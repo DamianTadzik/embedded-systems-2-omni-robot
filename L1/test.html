@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8" />
+  <title>Omni Robot Web Joystick</title>
+
+  <!-- Lokalne biblioteki -->
+  <script src="mqttws31.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/nipplejs@0.9.0/dist/nipplejs.min.js"></script>
+  
+  <style>
+    #joystick1 {
+      position: relative; /* <--- najważniejsze */
+      display: inline-block;
+      background: #f0f0f0;
+      border-radius: 50%;
+      border: 2px solid #ccc;
+    }
+    body {
+      font-family: "Segoe UI", sans-serif;
+      text-align: center;
+      background: #f5f7fa;
+      margin: 0;
+      padding: 0;
+    }
+    h1 {
+      background: #1f6feb;
+      color: white;
+      padding: 15px 0;
+      margin: 0 0 10px 0;
+      font-size: 22px;
+    }
+    .container {
+      display: flex;
+      justify-content: space-around;
+      align-items: flex-start;
+      flex-wrap: wrap;
+      margin-top: 10px;
+    }
+    #joystick1, #joystick2 {
+      width: 200px;
+      height: 200px;
+      border: 2px solid #ccc;
+      border-radius: 50%;
+      background: #f0f0f0;
+      margin: 10px auto;
+    }
+    .slider-container {
+      margin: 20px auto;
+      width: 250px;
+    }
+    input[type="range"] {
+      width: 100%;
+    }
+    .telemetry {
+      background: #fff;
+      border-radius: 10px;
+      box-shadow: 0 0 5px rgba(0,0,0,0.1);
+      padding: 15px;
+      margin: 10px auto;
+      width: 300px;
+      text-align: left;
+      font-family: monospace;
+    }
+    .status-dot {
+      display: inline-block;
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      margin-right: 6px;
+    }
+    .status-ok { background: #2ecc71; }
+    .status-error { background: #e74c3c; }
+    .status-wait { background: #f1c40f; }
+  </style>
+</head>
+<body>
+  <h1>🕹️ Omni Robot Web Controller</h1>
+
+  <div class="container">
+    <div>
+      <h3>Joystick (vx, vy)</h3>
+      <div id="joystick1"></div>
+    </div>
+
+    <div>
+      <h3>Rotation (omega)</h3>
+      <div class="slider-container">
+        <input type="range" id="omegaSlider" min="-3.14" max="3.14" step="0.05" value="0">
+        <div>Ω = <span id="omegaValue">0.00</span> rad/s</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="telemetry">
+    <div><span id="conn-dot" class="status-dot status-wait"></span><strong>Status MQTT:</strong> <span id="conn-status">Łączenie...</span></div>
+    <hr>
+    <div><strong>Ostatnie dane:</strong></div>
+    <div>vx = <span id="tele-vx">0.00</span> m/s</div>
+    <div>vy = <span id="tele-vy">0.00</span> m/s</div>
+    <div>ω  = <span id="tele-omega">0.00</span> rad/s</div>
+    <div>Ostatnia wysyłka: <span id="last-send">-</span></div>
+  </div>
+
+  <script>
+    // === KONFIGURACJA ===
+   // const brokerHost = "ws://192.168.0.42:9001"; // <--- IP twojego Jetsona
+   // const topic = "robot/cmd_vel";
+
+    const brokerHost = "ws://localhost:9001";
+    const topic = "robot/cmd_vel";
+
+    // === MQTT ===
+    const client = new Paho.Client("localhost", 9001, "webclient_" + Math.random());
+
+    const connDot = document.getElementById("conn-dot");
+    const connStatus = document.getElementById("conn-status");
+    const teleVX = document.getElementById("tele-vx");
+    const teleVY = document.getElementById("tele-vy");
+    const teleOmega = document.getElementById("tele-omega");
+    const lastSend = document.getElementById("last-send");
+
+    function setStatus(state, text) {
+      connStatus.innerText = text;
+      connDot.className = "status-dot " + state;
+    }
+
+    client.connect({
+      onSuccess: () => {
+        setStatus("status-ok", "Połączono z brokerem");
+        client.subscribe(topic);
+      },
+      onFailure: (e) => {
+        setStatus("status-error", "Błąd połączenia: " + e.errorMessage);
+      }
+    });
+
+    client.onConnectionLost = (responseObject) => {
+      if (responseObject.errorCode !== 0) {
+        setStatus("status-error", "Utracono połączenie");
+      }
+    };
+
+    // === Sterowanie zmiennymi ===
+    let vx = 0, vy = 0, omega = 0;
+    const publishInterval = 100; // ms
+
+    function publishCommand() {
+      const msg = JSON.stringify({ vx, vy, omega });
+      const message = new Paho.Message(msg);
+      message.destinationName = topic;
+      try {
+        client.send(message);
+        const now = new Date();
+        lastSend.innerText = now.toLocaleTimeString();
+        teleVX.innerText = vx.toFixed(2);
+        teleVY.innerText = vy.toFixed(2);
+        teleOmega.innerText = omega.toFixed(2);
+      } catch {
+        setStatus("status-error", "Błąd wysyłania MQTT");
+      }
+      console.log("MQTT publish:", msg);
+    }
+
+    // === JOYSTICK (vx, vy) ===
+    const joystick1 = nipplejs.create({
+      zone: document.getElementById('joystick1'),
+      mode: 'static',
+      position: { left: '50%', top: '50%' },
+      color: '#1f6feb',
+      size: 180
+    });
+
+    joystick1.on('move', (evt, data) => {
+      const maxSpeed = 0.5; // m/s
+      const angle = data.angle?.radian || 0;
+      const dist = Math.min(data.distance || 0, 100) / 100;
+      vx = maxSpeed * dist * Math.cos(angle);
+      vy = maxSpeed * dist * Math.sin(angle);
+    });
+
+    joystick1.on('end', () => {
+      // po puszczeniu drążka resetuj do 0 i wyślij
+      vx = 0;
+      vy = 0;
+      teleVX.innerText = vx.toFixed(2);
+      teleVY.innerText = vy.toFixed(2);
+      publishCommand();
+    });
+
+
+    // === SLIDER OMEGA ===
+    const slider = document.getElementById("omegaSlider");
+    const omegaText = document.getElementById("omegaValue");
+
+    slider.addEventListener("input", () => {
+      omega = parseFloat(slider.value);
+      omegaText.innerText = omega.toFixed(2);
+    });
+
+    // Reset po puszczeniu (np. po zakończeniu ruchu myszką)
+    slider.addEventListener("change", () => {
+      omega = 0;
+      slider.value = 0;
+      omegaText.innerText = "0.00";
+      publishCommand();
+    });
+
+
+    // === Wysyłanie co określony interwał ===
+    setInterval(() => {
+      if (client.isConnected()) {
+        publishCommand();
+      }
+    }, publishInterval);
+  </script>
+</body>
+</html>
