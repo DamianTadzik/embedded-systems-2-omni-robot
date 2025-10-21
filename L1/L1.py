@@ -102,12 +102,29 @@ time.sleep(2)  # Poczekaj na reset Arduino
 def control_action(wheel_cmds):
 
     #unpack wheel_cmds into speeds and directions
-    speeds = [random.randint(0,255) for _ in range(4)]  # prędkości TL, TR, BL, BR
-    directions = [random.randint(0, 1) for _ in range(4)]  # kierunki 0 (LOW) lub 1 (HIGH)
+    speeds = [0 for _ in range(4)]  # prędkości TL, TR, BL, BR
+    directions = [0 for _ in range(4)]  # kierunki 0 (LOW) lub 1 (HIGH)
     distance = random.randint(0, 0)  # dystans (choć w 240 nie jest używany)
 
+    # prawe tylne
     speeds[0] = wheel_cmds[0][0]
+    directions[0] = wheel_cmds[0][1]
 
+    # lewe tylne 
+    speeds[1] = wheel_cmds[1][0]
+    directions[1] = wheel_cmds[1][1]
+
+    # przednie prawe
+    speeds[2] = wheel_cmds[2][0]
+    directions[2] = wheel_cmds[2][1]
+
+    # przednie lewe
+    speeds[3] = wheel_cmds[3][0]
+    directions[3] = wheel_cmds[3][1]
+    
+    print(speeds)
+    print(directions)
+    
     # Składanie komendy (komenda 240 + 9 wartości)
     command = [240, distance] + speeds + directions
 
