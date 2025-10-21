@@ -172,11 +172,11 @@
     });
 
     joystick1.on('move', (evt, data) => {
-      const maxSpeed = 0.5; // m/s
+      const maxSpeed = 1; // m/s
       const angle = data.angle?.radian || 0;
       const dist = Math.min(data.distance || 0, 100) / 100;
-      vx = maxSpeed * dist * Math.cos(angle);
-      vy = maxSpeed * dist * Math.sin(angle);
+      vx = maxSpeed * dist * Math.sin(angle);
+      vy = maxSpeed * dist * Math.cos(angle);
     });
 
     joystick1.on('end', () => {
