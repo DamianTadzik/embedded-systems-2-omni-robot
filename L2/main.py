@@ -1,6 +1,8 @@
 # IMPORTS
 import numpy as np
+import paho.mqtt.client as mqtt
 import time
+import json
 
 # CONSTANTS
 # Image size
@@ -18,16 +20,19 @@ DT = 0.01 # s
 HORIZONTAL_ANGLE_THRESHOLD = 0.087 # rad
 FACING_DISTANCE_THRESHOLD = 0.1
 # Parameters for PID control
-UPPER_SAT_TH = 1
-LOWER_SAT_TH = 1
+SAT_TH_ANGLE = 0.1
+SAT_TH_DISTANCE = 0.1
 # Distance PID
-KP_ANGLE = 1
+KP_ANGLE = 0.1
 KI_ANGLE = 0
 KD_ANGLE = 0
 # Angle PID
-KP_DIST = 1
+KP_DIST = 0.1
 KI_DIST = 0
 KD_DIST = 0
+
+# PARAMETERS FOR MQTT COMMUNICATION
+MQTT_TOPIC = "robot/cmd_vel"
 
 # CLASSES
 class PIDController:
@@ -51,53 +56,72 @@ class PIDController:
             
             return output
 
-#FUNCTIONS
-def saturation(value):
-    if value > UPPER_SAT_TH:
-        result = UPPER_SAT_TH
-    elif value < LOWER_SAT_TH:
-        result = LOWER_SAT_TH
+# FUNCTIONS
+def move_forawrd_saturation(value):
+    if value > SAT_TH_DISTANCE:
+        result = SAT_TH_DISTANCE
+    elif value < -SAT_TH_DISTANCE:
+        result = -SAT_TH_DISTANCE
     else:
         result = value
     return result
+
+def rotate_saturation(value):
+    if value > SAT_TH_ANGLE:
+        result = SAT_TH_ANGLE
+    elif value < -SAT_TH_ANGLE:
+        result = -SAT_TH_ANGLE
+    else:
+        result = value
+    return result
+
+def mqtt_on_message(client, userdata, msg):
+    print(msg.topic+" "+str(msg.payload))
 
 # INPUTS
 distance = 1 # m, distance from the object
 C = [900, 300] # [x,y] pixel coordinates, center of the object
 
-# LOOP
+# MAIN
 # Setpoints
 SP_distance = 0.3 # 30cm
 SP_angle = 0
 if(REG_CHOICE) == 'PID':
     PID_distance = PIDController(KP_DIST,KI_DIST,KD_DIST,SP_distance)
     PID_angle = PIDController(KP_ANGLE,KI_ANGLE,KD_ANGLE,SP_angle)
+mqttc = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+mqttc.on_message = "Data sent."
+mqttc.connect("localhost", 1883, 60)
 timer = time.time()
 
+# Loop
 while(1):
-    if time.time() - timer > DT: # pętla czasowa
+    if time.time() - timer > DT: # timed loop
         timer = time.time()
         A = np.deg2rad((C[0] - X//2)/X*H_FOV) # horizontal_angle_difference
         D = distance*np.cos(A)
         if REG_CHOICE == 'TWO-POS':
             rotate = 0
             if A > HORIZONTAL_ANGLE_THRESHOLD:
-                rotate = 0.5
+                rotate = SAT_TH_ANGLE
             elif A < -HORIZONTAL_ANGLE_THRESHOLD:
-                rotate = -0.5
+                rotate = -SAT_TH_ANGLE
             move_forward = 0
             if D > SP_distance + FACING_DISTANCE_THRESHOLD:
-                move_forward = 0.5
+                move_forward = SAT_TH_DISTANCE
             elif D < SP_distance -FACING_DISTANCE_THRESHOLD:
-                move_forward = -0.5
+                move_forward = -SAT_TH_DISTANCE
         elif REG_CHOICE == 'PID':
             Pmove_forward = PID_distance.compute(D, DT)
             rotate = PID_angle.compute(A, DT)
-            move_forward = saturation(move_forward) # [-1,1] output
-            rotate = saturation(rotate) # [-1,1] output
+            move_forward = move_forawrd_saturation(move_forward)
+            rotate = rotate_saturation(rotate)
         else:
             break
+        out_data = {"vx":float(move_forward), "vy":0.0, "omega":float(rotate)}
+        out_msg = json.dumps(out_data, separators=(',', ':'))
+        mqttc.publish(MQTT_TOPIC, out_msg, 0)
 
-
-
-
+# TO DO
+# - check image constants (X,Y)
+# - tune PID
