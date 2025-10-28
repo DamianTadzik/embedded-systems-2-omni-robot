@@ -1,53 +1,41 @@
 #include <Arduino.h>
 
-// Definicje pinów
+// === Definicje pinów ===
 const int pinDirTL = 15, pinPwmTL = 5, pinEncATL = 2, pinEncBTL = 18;
 const int pinDirTR = 11, pinPwmTR = 10, pinEncATR = 12, pinEncBTR = 21;
-
 const int pinDirBL = 19, pinPwmBL = 3, pinEncABL = 4, pinEncBBL = 8;
 const int pinDirBR = 16, pinPwmBR = 9, pinEncABR = 6, pinEncBBR = 7;
 
-int distance = 0;
-int expectedDataSize = 0;
-int dataBuffer[9];
-int dataIndex = 0;
-int lastReceivedByte = 1000;
-
-// Telemetry timing
+// === Timery ===
 unsigned long lastTelemetryTime = 0;
-const unsigned long telemetryInterval = 10; // [10ms] how often to print counts
+const unsigned long telemetryInterval = 1000; // ms
 
-// Liczniki impulsów dla enkoderów
-volatile int countTL = 0, countTR = 0, countBL = 0, countBR = 0;
-bool advancedControl = false;
-bool advancedControl_stop = false;
+unsigned long lastRegulationTime = 0;
+const unsigned long regulationInterval = 100; // ms
 
-// Callbacks
-void countPulseTL() {
-  if (digitalRead(pinEncBTL)) countTL++;  // forward
-  else countTL--;                          // backward
-}
-void countPulseTR() {
-  if (digitalRead(pinEncBTR)) countTR++;
-  else countTR--;
-}
-void countPulseBL() {
-  if (digitalRead(pinEncBBL)) countBL++;
-  else countBL--;
-}
-void countPulseBR() {
-  if (digitalRead(pinEncBBR)) countBR++;
-  else countBR--;
-}
+unsigned long lastCommandTime = 0;
+const unsigned long commandTimeout = 1000; // ms, brak komendy → stop
 
-// Globalne zmienne do regulatora 
-volatile float RPMSetpointTL = 0.0, RPMSetpointTR = 0.0, RPMSetpointBL = 0.0, RPMSetpointBR = 0.0;
+// === Enkodery ===
+volatile int32_t countTL = 0, countTR = 0, countBL = 0, countBR = 0;
+volatile int32_t prev_count_TL = 0, prev_count_TR = 0, prev_count_BL = 0, prev_count_BR = 0;
+// --- Parametry enkoderów ---
+const float encoderPulsesPerRevolution = 240.0;
+const float regulationInterval_s = regulationInterval / 1000.0; // 0.1 s
+void countPulseTL() { if (digitalRead(pinEncBTL)) countTL++; else countTL--; }
+void countPulseTR() { if (digitalRead(pinEncBTR)) countTR++; else countTR--; }
+void countPulseBL() { if (digitalRead(pinEncBBL)) countBL++; else countBL--; }
+void countPulseBR() { if (digitalRead(pinEncBBR)) countBR++; else countBR--; }
 
+// === Regulator / sterowanie ===
+// To jest requested speed setpoint
+volatile int requested_speed_setpoint_TL = 0, requested_speed_setpoint_TR = 0, requested_speed_setpoint_BL = 0, requested_speed_setpoint_BR = 0;
 
-// Globalne zmienne do przechowywania prędkości silników /XD
-int currentSpeedTL = 0, currentSpeedTR = 0, currentSpeedBL = 0, currentSpeedBR = 0;
-int targetSpeedTL = 0, targetSpeedTR = 0, targetSpeedBL = 0, targetSpeedBR = 0;
-const int speedIncrement = 1; // Krok zmiany prędkości
+// To jest calculated speed from encoder
+volatile float current_speed_TL = 0.0, current_speed_TR = 0.0,  current_speed_BL = 0.0, current_speed_BR = 0.0;  // finish that TODO
+
+// To leci na silniki calculated dutycycle
+volatile int calculated_dutycycle_TL = 0, calculated_dutycycle_TR = 0, calculated_dutycycle_BL = 0, calculated_dutycycle_BR = 0;
 
 void setup() {
   // Ustawienie pinów jako wyjścia
@@ -78,181 +66,139 @@ void setup() {
 }
 
 
-void setMotorSpeed(int TL, int TR, int BL, int BR) {
- analogWrite(pinPwmTL, TL);
- analogWrite(pinPwmTR, TR);
- analogWrite(pinPwmBL, BL);
- analogWrite(pinPwmBR, BR);
+// === Funkcja do sterowania silnikami ===
+// TL/TR/BL/BR ∈ [-255, 255] → kierunek i PWM
+void actuateMotors(int TL, int TR, int BL, int BR) {
+  // --- TOP LEFT ---
+  digitalWrite(pinDirTL, (TL >= 0) ? HIGH : LOW);
+  analogWrite(pinPwmTL, abs(TL));
+
+  // --- TOP RIGHT ---
+  digitalWrite(pinDirTR, (TR >= 0) ? HIGH : LOW);
+  analogWrite(pinPwmTR, abs(TR));
+
+  // --- BOTTOM LEFT ---
+  digitalWrite(pinDirBL, (BL >= 0) ? HIGH : LOW);
+  analogWrite(pinPwmBL, abs(BL));
+
+  // --- BOTTOM RIGHT ---
+  digitalWrite(pinDirBR, (BR >= 0) ? HIGH : LOW);
+  analogWrite(pinPwmBR, abs(BR));
 }
 
+// === UART ramka ===
+// 255 param setpointspeedTL setpointspeedTR setpointspeedBL setpointspeedBR
+#define PAYLOAD_BUF_LEN 5
+uint8_t payload_buffer[PAYLOAD_BUF_LEN] = { 0 };
+int index = 0;
 
-void setMotorDirection(bool TL, bool TR, bool BL, bool BR) {
- digitalWrite(pinDirTL, TL);
- digitalWrite(pinDirTR, TR);
- digitalWrite(pinDirBL, BL);
- digitalWrite(pinDirBR, BR);
+// === Dekodowanie ramki ===
+void handle_payload_buffer(void)
+{
+  int mult = payload_buffer[0];
+  requested_speed_setpoint_TL = ((int)payload_buffer[1] - 100) * mult;
+  requested_speed_setpoint_TR = ((int)payload_buffer[2] - 100) * mult;
+  requested_speed_setpoint_BL = ((int)payload_buffer[3] - 100) * mult;
+  requested_speed_setpoint_BR = ((int)payload_buffer[4] - 100) * mult;
 }
 
+// === Obliczanie prędkości z enkoderów ===
+void calculate_current_encoder_speeds(void)
+{
+  noInterrupts();
+  int32_t cur_TL = countTL;
+  int32_t cur_TR = countTR;
+  int32_t cur_BL = countBL;
+  int32_t cur_BR = countBR;
+  interrupts();
 
-void stopMotors() {
- countTL = countTR = countBL = countBR = 0;
- targetSpeedTL = 0, targetSpeedTR = 0, targetSpeedBL = 0, targetSpeedBR = 0;
- delay(10);
-}
+  // Zmiana liczby impulsów od ostatniego pomiaru
+  int32_t dTL = cur_TL - prev_count_TL;
+  int32_t dTR = cur_TR - prev_count_TR;
+  int32_t dBL = cur_BL - prev_count_BL;
+  int32_t dBR = cur_BR - prev_count_BR;
 
-void handleComplexCommand(int distance_, int speedTL, int speedTR, int speedBL, int speedBR, int dirTL, int dirTR, int dirBL, int dirBR) {
- advancedControl = true;
- distance = distance_ *10;
- setMotorDirection(dirTL == 1 ? HIGH : LOW, dirTR == 1 ? HIGH : LOW, dirBL == 1 ? HIGH : LOW, dirBR == 1 ? HIGH : LOW);
- targetSpeedTL = speedTL;
- targetSpeedTR = speedTR;
- targetSpeedBL = speedBL;
- targetSpeedBR = speedBR;
- 
-}
+  prev_count_TL = cur_TL;
+  prev_count_TR = cur_TR;
+  prev_count_BL = cur_BL;
+  prev_count_BR = cur_BR;
 
-
-void handleTwoSpeedCommand(int distance_, int speedTL, int speedTR, int speedBL, int speedBR, int dirTL, int dirTR, int dirBL, int dirBR) {
-    setMotorDirection(dirTL == 1 ? HIGH : LOW, dirTR == 1 ? HIGH : LOW, dirBL == 1 ? HIGH : LOW, dirBR == 1 ? HIGH : LOW);
-    targetSpeedTL = speedTL;
-    targetSpeedTR = speedTR;
-    targetSpeedBL = speedBL;
-    targetSpeedBR = speedBR;
-}
-
-void updateMotorSpeeds() {
-    bool speedUpdated = false; // Flaga do śledzenia aktualizacji prędkości
-
-    // Aktualizuj prędkość TL
-    if (currentSpeedTL != targetSpeedTL) {
-        if (currentSpeedTL < targetSpeedTL) {
-            currentSpeedTL += speedIncrement;
-            if (currentSpeedTL > targetSpeedTL) currentSpeedTL = targetSpeedTL;
-        } else {
-            currentSpeedTL -= speedIncrement;
-            if (currentSpeedTL < targetSpeedTL) currentSpeedTL = targetSpeedTL;
-        }
-        speedUpdated = true;
-    }
-
-    // Aktualizuj prędkość TR
-    if (currentSpeedTR != targetSpeedTR) {
-        if (currentSpeedTR < targetSpeedTR) {
-            currentSpeedTR += speedIncrement;
-            if (currentSpeedTR > targetSpeedTR) currentSpeedTR = targetSpeedTR;
-        } else {
-            currentSpeedTR -= speedIncrement;
-            if (currentSpeedTR < targetSpeedTR) currentSpeedTR = targetSpeedTR;
-        }
-        speedUpdated = true;
-    }
-
-    // Aktualizuj prędkość BL
-    if (currentSpeedBL != targetSpeedBL) {
-        if (currentSpeedBL < targetSpeedBL) {
-            currentSpeedBL += speedIncrement;
-            if (currentSpeedBL > targetSpeedBL) currentSpeedBL = targetSpeedBL;
-        } else {
-            currentSpeedBL -= speedIncrement;
-            if (currentSpeedBL < targetSpeedBL) currentSpeedBL = targetSpeedBL;
-        }
-        speedUpdated = true;
-    }
-
-    // Aktualizuj prędkość BR
-    if (currentSpeedBR != targetSpeedBR) {
-        if (currentSpeedBR < targetSpeedBR) {
-            currentSpeedBR += speedIncrement;
-            if (currentSpeedBR > targetSpeedBR) currentSpeedBR = targetSpeedBR;
-        } else {
-            currentSpeedBR -= speedIncrement;
-            if (currentSpeedBR < targetSpeedBR) currentSpeedBR = targetSpeedBR;
-        }
-        speedUpdated = true;
-    }
-
-    // Ustaw prędkości silników tylko jeśli zostały zaktualizowane
-    if (speedUpdated) {
-        setMotorSpeed(currentSpeedTL, currentSpeedTR, currentSpeedBL, currentSpeedBR);
-    }
+  // Prędkość w [obr/min]
+  float conv = (60.0 / encoderPulsesPerRevolution) / regulationInterval_s; // (imp / rev) * (interval)
+  current_speed_TL = dTL * conv;
+  current_speed_TR = dTR * conv;
+  current_speed_BL = dBL * conv;
+  current_speed_BR = dBR * conv;
 }
 
 void loop() {
-  // Warunek zatrzymania silników dla trybu zaawansowanego sterowania
-  if (advancedControl && (countTL >= distance || countTR >= distance || countBL >= distance || countBR >= distance)) {
-    stopMotors();
-    delay(10);
-    advancedControl = false; // Wyłączenie trybu zaawansowanego sterowania
-    if (lastReceivedByte == 250) {
-      advancedControl_stop = true; // Ustawienie flagi tylko jeśli ostatni otrzymany bajt to 250
-      delay(10);
-      lastReceivedByte = 1000;
+  // --- UART read ---
+  while (Serial.available() > 0) 
+  {
+    int received_byte = Serial.read();
+    
+    if (received_byte == 255)  // Frame start byte xdddd
+      index = 0;
+    else if (index < PAYLOAD_BUF_LEN) {
+      payload_buffer[index++] = received_byte;
+      if (index == PAYLOAD_BUF_LEN) {
+        handle_payload_buffer();
+        lastCommandTime = millis();
+      }
     }
   }
-  if (advancedControl_stop) {
-    delay(10);
-    Serial.println(advancedControl_stop ? "true" : "false");
-    delay(10);
-    advancedControl_stop = false;
+
+  // Periodic speed, regualtor and other actuations calculation
+  if (millis() - lastRegulationTime >= regulationInterval){
+    lastRegulationTime = millis();
+
+    // Compute the speeds from the encoders
+    calculate_current_encoder_speeds();
+
+    // Compute the error, Compute the regulator output xd
+
+    // Manually select the regulator or just feedforward
+    if (false)
+    {
+      // --- Simple P regulator ---
+      const float Kp = 1.0f;  // tune it later xd
+
+      float err_TL = requested_speed_setpoint_TL - current_speed_TL;
+      float err_TR = requested_speed_setpoint_TR - current_speed_TR;
+      float err_BL = requested_speed_setpoint_BL - current_speed_BL;
+      float err_BR = requested_speed_setpoint_BR - current_speed_BR;
+
+      calculated_dutycycle_TL = constrain((int)(Kp * err_TL), -255, 255);
+      calculated_dutycycle_TR = constrain((int)(Kp * err_TR), -255, 255);
+      calculated_dutycycle_BL = constrain((int)(Kp * err_BL), -255, 255);
+      calculated_dutycycle_BR = constrain((int)(Kp * err_BR), -255, 255);
+    }
+    else
+    {
+      // --- Feedforward mode (no feedback) ---
+      // Directly map requested speeds to duty cycle
+      // Assuming requested_speed_setpoint_* ∈ [-255, 255]
+      calculated_dutycycle_TL = constrain(requested_speed_setpoint_TL, -255, 255);
+      calculated_dutycycle_TR = constrain(requested_speed_setpoint_TR, -255, 255);
+      calculated_dutycycle_BL = constrain(requested_speed_setpoint_BL, -255, 255);
+      calculated_dutycycle_BR = constrain(requested_speed_setpoint_BR, -255, 255);
+    }
   }
 
-  updateMotorSpeeds();
-
-  while (Serial.available() > 0) {
-    int receivedByte = Serial.read();
-    if (dataIndex == 0 && (receivedByte == 250 || receivedByte == 240 || receivedByte == 255 || receivedByte == 245)) {
-      lastReceivedByte = receivedByte;
-      dataIndex = 1;  // Zaczynamy zbierać dane komendy
-      if (receivedByte == 240) {
-        expectedDataSize = 9;  // Prędkość1 + prędkość2
-      } else if (receivedByte == 250){
-        expectedDataSize = 9;
-      } else if (receivedByte == 255){
-        expectedDataSize = 1;  // Komenda + prędkość + odległość
-      } else if (receivedByte == 245) {
-        expectedDataSize = 4; // 4 speeds (int8_t)
-      } else {
-        //nic
-      }
-    } else if (dataIndex > 0) {
-      dataBuffer[dataIndex - 1] = receivedByte;  // Zapisujemy dane do bufora
-      dataIndex++;
-
-      // Jeśli otrzymaliśmy wszystkie dane komendy
-      if (dataIndex == expectedDataSize + 1) {
-        if (lastReceivedByte == 240) {
-          countTL = countTR = countBL = countBR = 0;
-          handleTwoSpeedCommand(dataBuffer[0], dataBuffer[1], dataBuffer[2], dataBuffer[3], dataBuffer[4], dataBuffer[5], dataBuffer[6], dataBuffer[7],dataBuffer[8]);  // prędkości i kierunki
-        } else if (lastReceivedByte == 250){
-          countTL = countTR = countBL = countBR = 0;
-          handleComplexCommand(dataBuffer[0], dataBuffer[1], dataBuffer[2], dataBuffer[3], dataBuffer[4], dataBuffer[5], dataBuffer[6], dataBuffer[7],dataBuffer[8]);  // Obsługujemy złożoną komendę
-        } else if (lastReceivedByte == 255){
-          countTL = countTR = countBL = countBR = 0;
-          stopMotors(); 
-        } else if (lastReceivedByte == 245) {
-          // interpret signed speeds
-          int8_t sTL = (int8_t)dataBuffer[0];
-          int8_t sTR = (int8_t)dataBuffer[1];
-          int8_t sBL = (int8_t)dataBuffer[2];
-          int8_t sBR = (int8_t)dataBuffer[3];
-
-          // store as target speeds for the PID controller
-          RPMSetpointTL = (float)sTL / 128.0;
-          RPMSetpointTR = (float)sTR / 128.0;
-          RPMSetpointBL = (float)sBL / 128.0;
-          RPMSetpointBR = (float)sBR / 128.0;
-        } else {
-          //nic
-        }
-        dataIndex = 0;  // Resetujemy indeks danych
-      }
-    } else {
-      // nic
-    }
+  // --- if no command → stop ---
+  if (millis() - lastCommandTime < commandTimeout) {
+    actuateMotors(calculated_dutycycle_TL,
+                  calculated_dutycycle_TR,
+                  calculated_dutycycle_BL,
+                  calculated_dutycycle_BR);
+  } else {
+    actuateMotors(0, 0, 0, 0);
   }
 
   // Periodic telemetry
   if (millis() - lastTelemetryTime >= telemetryInterval) {
+    lastTelemetryTime = millis();
+
     noInterrupts();  // protect counts during read
     int TL = countTL;
     int TR = countTR;
@@ -264,9 +210,12 @@ void loop() {
     Serial.print(TL); Serial.print(",");
     Serial.print(TR); Serial.print(",");
     Serial.print(BL); Serial.print(",");
-    Serial.println(BR);
-
-    lastTelemetryTime = millis();
+    Serial.print(BR);
+    Serial.print(", RPM,");
+    Serial.print(current_speed_TL); Serial.print(",");
+    Serial.print(current_speed_TR); Serial.print(",");
+    Serial.print(current_speed_BL); Serial.print(",");
+    Serial.println(current_speed_BR);
   }
-  delay(10);
+  delay(1);
 }
