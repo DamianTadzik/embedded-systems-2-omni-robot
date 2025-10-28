@@ -123,8 +123,17 @@ def control_action(wheel_cmds):
     # multiplier = 1 (normal), -1 (reverse) – możesz wykorzystać np. do odwrócenia sterowania globalnie
     multiplier = 1
 
-    # Przeskaluj prędkości z [-100,100] → [0,200]
-    encoded_speeds = [int((speed + 100)) for speed in wheel_cmds]
+    # Zamień (speed, direction) → signed speed w [-100, 100]
+    speeds_signed = []
+    for speed, direction in wheel_cmds:
+        # Przelicz np. 0–255 na -100…100 z kierunkiem
+        percent = (speed / 255.0) * 100.0
+        if direction == 0:
+            percent *= -1
+        speeds_signed.append(percent)
+
+    # Teraz przeskaluj [-100,100] → [0,200]
+    encoded_speeds = [int(percent + 100) for percent in speeds_signed]
 
     # Ogranicz do zakresu bajtu
     encoded_speeds = [max(0, min(200, s)) for s in encoded_speeds]
