@@ -32,7 +32,13 @@ KI_DIST = 0
 KD_DIST = 0
 
 # PARAMETERS FOR MQTT COMMUNICATION
-MQTT_TOPIC = "robot/cmd_vel"
+MQTT_PUBLISH_TOPIC = "robot/cmd_vel"    # output
+# sending [vx, vy, omega] array containing translational (x,y) and rotatational velocities
+# in SI units (m/s, m/s, rad/s)
+MQTT_SUBSCRIBE_TOPIC = "robot/cmd_vel_1"    # input
+# receiving distance from detected object (distance) and it's center placement
+# on the image (C)
+MQTT_BROKER_IP = "192.168.50.53"
 
 # CLASSES
 class PIDController:
@@ -76,11 +82,16 @@ def rotate_saturation(value):
     return result
 
 def mqtt_on_message(client, userdata, msg):
-    print(msg.topic+" "+str(msg.payload))
+    global distance, C
+    try:
+        data = json.loads(msg.payload.decode())
+        vx = float(data.get("vx",0))
+        vy = float(data.get("vy",0))
+        omega = float(data.get("omega",0))
+        print(vx,vy,omega)
+    except:
+        print("Error.")
 
-# INPUTS
-distance = 1 # m, distance from the object
-C = [900, 300] # [x,y] pixel coordinates, center of the object
 
 # MAIN
 # Setpoints
@@ -90,12 +101,18 @@ if(REG_CHOICE) == 'PID':
     PID_distance = PIDController(KP_DIST,KI_DIST,KD_DIST,SP_distance)
     PID_angle = PIDController(KP_ANGLE,KI_ANGLE,KD_ANGLE,SP_angle)
 mqttc = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
-mqttc.on_message = "Data sent."
-mqttc.connect("localhost", 1883, 60)
+mqttc.connect(MQTT_BROKER_IP, 1883, 60)
+mqttc.on_message = mqtt_on_message
 timer = time.time()
+mqttc.loop_start()
+
+# INPUTS
+distance = SP_distance # m, distance from the object
+C = [X//2, Y//2] # [x,y] pixel coordinates, center of the object
 
 # Loop
 while(1):
+    mqttc.subscribe(MQTT_SUBSCRIBE_TOPIC)
     if time.time() - timer > DT: # timed loop
         timer = time.time()
         A = np.deg2rad((C[0] - X//2)/X*H_FOV) # horizontal_angle_difference
@@ -120,7 +137,9 @@ while(1):
             break
         out_data = {"vx":float(move_forward), "vy":0.0, "omega":float(rotate)}
         out_msg = json.dumps(out_data, separators=(',', ':'))
-        mqttc.publish(MQTT_TOPIC, out_msg, 0)
+        mqttc.publish(MQTT_PUBLISH_TOPIC, out_msg, 0)
+    
+mqttc.loop_stop()
 
 # TO DO
 # - check image constants (X,Y)
