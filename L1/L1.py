@@ -132,6 +132,9 @@ def control_action(wheel_cmds):
             percent *= -1
         speeds_signed.append(percent)
 
+    speeds_signed[1] = -1*speeds_signed[1]
+    speeds_signed[3] = -1*speeds_signed[3]
+
     # Teraz przeskaluj [-100,100] → [0,200]
     encoded_speeds = [int(percent + 100) for percent in speeds_signed]
 
