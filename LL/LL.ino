@@ -155,24 +155,64 @@ void loop() {
     // Compute the speeds from the encoders
     calculate_current_encoder_speeds();
 
-    // Compute the error, Compute the regulator output xd
-
     // Manually select the regulator or just feedforward
     if (false)
     {
       // --- Simple P regulator ---
-      const float Kp = 1.0f;  // tune it later xd
+      const float Kp = 1.2f;  // tune it later xd
 
+    // Compute the error, Compute the regulator output xd
       float err_TL = requested_speed_setpoint_TL - current_speed_TL;
       float err_TR = requested_speed_setpoint_TR - current_speed_TR;
       float err_BL = requested_speed_setpoint_BL - current_speed_BL;
       float err_BR = requested_speed_setpoint_BR - current_speed_BR;
 
-      calculated_dutycycle_TL = constrain((int)(Kp * err_TL), -255, 255);
+      calculated_dutycycle_TL = constrain(-(int)(Kp * err_TL), -255, 255);
       calculated_dutycycle_TR = constrain((int)(Kp * err_TR), -255, 255);
-      calculated_dutycycle_BL = constrain((int)(Kp * err_BL), -255, 255);
+      calculated_dutycycle_BL = constrain(-(int)(Kp * err_BL), -255, 255);
       calculated_dutycycle_BR = constrain((int)(Kp * err_BR), -255, 255);
     }
+    else if (true)
+    {
+      // --- Simple PI regulator ---
+      const float Kp = 1.2f;   // proportional gain
+      const float Ki = 0.8f;   // integral gain — do strojenia
+      const float Imax = 200.0f;  // anti-windup limit (to avoid integrator overflow)
+
+      // static — zachowują wartość między wywołaniami
+      static float I_TL = 0, I_TR = 0, I_BL = 0, I_BR = 0;
+
+      // --- Compute errors ---
+      float err_TL = requested_speed_setpoint_TL - current_speed_TL;
+      float err_TR = requested_speed_setpoint_TR - current_speed_TR;
+      float err_BL = requested_speed_setpoint_BL - current_speed_BL;
+      float err_BR = requested_speed_setpoint_BR - current_speed_BR;
+
+      // --- Integrate errors ---
+      I_TL += err_TL * (regulationInterval / 1000.0f);
+      I_TR += err_TR * (regulationInterval / 1000.0f);
+      I_BL += err_BL * (regulationInterval / 1000.0f);
+      I_BR += err_BR * (regulationInterval / 1000.0f);
+
+      // --- Anti-windup clamp ---
+      I_TL = constrain(I_TL, -Imax, Imax);
+      I_TR = constrain(I_TR, -Imax, Imax);
+      I_BL = constrain(I_BL, -Imax, Imax);
+      I_BR = constrain(I_BR, -Imax, Imax);
+
+      // --- Compute total control (P + I) ---
+      float u_TL = Kp * err_TL + Ki * I_TL;
+      float u_TR = Kp * err_TR + Ki * I_TR;
+      float u_BL = Kp * err_BL + Ki * I_BL;
+      float u_BR = Kp * err_BR + Ki * I_BR;
+
+      // --- Apply direction flips as in your snippet ---
+      calculated_dutycycle_TL = constrain(-(int)u_TL, -255, 255);
+      calculated_dutycycle_TR = constrain((int)u_TR, -255, 255);
+      calculated_dutycycle_BL = constrain(-(int)u_BL, -255, 255);
+      calculated_dutycycle_BR = constrain((int)u_BR, -255, 255);
+    }
+
     else
     {
       // --- Feedforward mode (no feedback) ---
