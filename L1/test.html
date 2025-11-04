@@ -104,14 +104,14 @@
 
   <script>
     // === KONFIGURACJA ===
-   // const brokerHost = "ws://192.168.0.42:9001"; // <--- IP twojego Jetsona
-   // const topic = "robot/cmd_vel";
+   const brokerHost = "ws://192.168.50.53:9001"; // <--- IP twojego Jetsona
+   const topic = "robot/cmd_vel";
 
-    const brokerHost = "ws://localhost:9001";
-    const topic = "robot/cmd_vel";
+    // const brokerHost = "ws://localhost:9001";
+    // const topic = "robot/cmd_vel";
 
     // === MQTT ===
-    const client = new Paho.Client("localhost", 9001, "webclient_" + Math.random());
+    const client = new Paho.Client("192.168.50.53", 9001, "webclient_" + Math.random());
 
     const connDot = document.getElementById("conn-dot");
     const connStatus = document.getElementById("conn-status");
@@ -172,11 +172,11 @@
     });
 
     joystick1.on('move', (evt, data) => {
-      const maxSpeed = 0.5; // m/s
+      const maxSpeed = 1; // m/s
       const angle = data.angle?.radian || 0;
       const dist = Math.min(data.distance || 0, 100) / 100;
-      vx = maxSpeed * dist * Math.cos(angle);
-      vy = maxSpeed * dist * Math.sin(angle);
+      vx = maxSpeed * dist * Math.sin(angle);
+      vy = maxSpeed * dist * Math.cos(angle);
     });
 
     joystick1.on('end', () => {
