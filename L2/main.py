@@ -6,8 +6,8 @@ import json
 
 # CONSTANTS
 # Image size
-X = 1280
-Y = 720
+X = 640
+Y = 480
 
 # Field of view
 H_FOV = 87
@@ -82,21 +82,26 @@ def rotate_saturation(value):
     return result
 
 def mqtt_on_message(client, userdata, msg):
-    global distance, C
+    global distance, Cx, Cy
     try:
         data = json.loads(msg.payload.decode())
-        vx = float(data.get("vx",0))
-        vy = float(data.get("vy",0))
-        omega = float(data.get("omega",0))
-        print(vx,vy,omega)
+        Cx = float(data.get("Cx",0))
+        Cy = float(data.get("Cy",0))
+        distance = float(data.get("distance",0))
     except:
         print("Error.")
 
 
 # MAIN
+# Globals/Inputs
+Cx = 0
+Cy = 0
+distance = 0
+
 # Setpoints
 SP_distance = 0.3 # 30cm
 SP_angle = 0
+
 if(REG_CHOICE) == 'PID':
     PID_distance = PIDController(KP_DIST,KI_DIST,KD_DIST,SP_distance)
     PID_angle = PIDController(KP_ANGLE,KI_ANGLE,KD_ANGLE,SP_angle)
@@ -106,17 +111,15 @@ mqttc.on_message = mqtt_on_message
 timer = time.time()
 mqttc.loop_start()
 
-# INPUTS
-distance = SP_distance # m, distance from the object
-C = [X//2, Y//2] # [x,y] pixel coordinates, center of the object
-
 # Loop
-while(1):
+while 1:
     mqttc.subscribe(MQTT_SUBSCRIBE_TOPIC)
+    C = [Cx, Cy]
     if time.time() - timer > DT: # timed loop
         timer = time.time()
         A = np.deg2rad((C[0] - X//2)/X*H_FOV) # horizontal_angle_difference
-        D = distance*np.cos(A)
+        #D = distance*np.cos(A)
+        D = distance
         if REG_CHOICE == 'TWO-POS':
             rotate = 0
             if A > HORIZONTAL_ANGLE_THRESHOLD:
@@ -140,7 +143,3 @@ while(1):
         mqttc.publish(MQTT_PUBLISH_TOPIC, out_msg, 0)
     
 mqttc.loop_stop()
-
-# TO DO
-# - check image constants (X,Y)
-# - tune PID
