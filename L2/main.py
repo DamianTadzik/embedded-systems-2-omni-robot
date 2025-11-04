@@ -14,14 +14,14 @@ H_FOV = 87
 V_FOV = 58
 
 # Parameters for control
-REG_CHOICE = '' # TWO-POS/PID
-DT = 0.01 # s
+REG_CHOICE = 'TWO-POS' # TWO-POS/PID
+DT = 0.5 # s
 # Parameters for two-post control
 HORIZONTAL_ANGLE_THRESHOLD = 0.087 # rad
 FACING_DISTANCE_THRESHOLD = 0.1
 # Parameters for PID control
-SAT_TH_ANGLE = 0.1
-SAT_TH_DISTANCE = 0.1
+SAT_TH_ANGLE = 1
+SAT_TH_DISTANCE = 1
 # Distance PID
 KP_ANGLE = 0.1
 KI_ANGLE = 0
@@ -35,10 +35,10 @@ KD_DIST = 0
 MQTT_PUBLISH_TOPIC = "robot/cmd_vel"    # output
 # sending [vx, vy, omega] array containing translational (x,y) and rotatational velocities
 # in SI units (m/s, m/s, rad/s)
-MQTT_SUBSCRIBE_TOPIC = "robot/cmd_vel_1"    # input
+MQTT_SUBSCRIBE_TOPIC = "robot/reg_input"    # input
 # receiving distance from detected object (distance) and it's center placement
 # on the image (C)
-MQTT_BROKER_IP = "192.168.50.53"
+MQTT_BROKER_IP = "localhost"
 
 # CLASSES
 class PIDController:
@@ -88,6 +88,7 @@ def mqtt_on_message(client, userdata, msg):
         Cx = float(data.get("Cx",0))
         Cy = float(data.get("Cy",0))
         distance = float(data.get("distance",0))
+        print(f"{Cx=}\t{Cy=}\t{distance=}")
     except:
         print("Error.")
 
@@ -110,36 +111,42 @@ mqttc.connect(MQTT_BROKER_IP, 1883, 60)
 mqttc.on_message = mqtt_on_message
 timer = time.time()
 mqttc.loop_start()
-
+mqttc.subscribe(MQTT_SUBSCRIBE_TOPIC)
+print("Loop started.")
 # Loop
-while 1:
-    mqttc.subscribe(MQTT_SUBSCRIBE_TOPIC)
-    C = [Cx, Cy]
-    if time.time() - timer > DT: # timed loop
-        timer = time.time()
-        A = np.deg2rad((C[0] - X//2)/X*H_FOV) # horizontal_angle_difference
-        #D = distance*np.cos(A)
-        D = distance
-        if REG_CHOICE == 'TWO-POS':
-            rotate = 0
-            if A > HORIZONTAL_ANGLE_THRESHOLD:
-                rotate = SAT_TH_ANGLE
-            elif A < -HORIZONTAL_ANGLE_THRESHOLD:
-                rotate = -SAT_TH_ANGLE
-            move_forward = 0
-            if D > SP_distance + FACING_DISTANCE_THRESHOLD:
-                move_forward = SAT_TH_DISTANCE
-            elif D < SP_distance -FACING_DISTANCE_THRESHOLD:
-                move_forward = -SAT_TH_DISTANCE
-        elif REG_CHOICE == 'PID':
-            Pmove_forward = PID_distance.compute(D, DT)
-            rotate = PID_angle.compute(A, DT)
-            move_forward = move_forawrd_saturation(move_forward)
-            rotate = rotate_saturation(rotate)
-        else:
-            break
-        out_data = {"vx":float(move_forward), "vy":0.0, "omega":float(rotate)}
+while True:
+    try:
+        C = [Cx, Cy]
+        if time.time() - timer > DT: # timed loop
+            timer = time.time()
+            A = np.deg2rad((C[0] - X//2)/X*H_FOV) # horizontal_angle_difference
+            #D  distance*np.cos(A)
+            D = distance
+            if REG_CHOICE == 'TWO-POS':
+                rotate = 0
+                if A > HORIZONTAL_ANGLE_THRESHOLD:
+                    rotate = SAT_TH_ANGLE
+                elif A < -HORIZONTAL_ANGLE_THRESHOLD:
+                    rotate = -SAT_TH_ANGLE
+                move_forward = 0
+                if D > SP_distance + FACING_DISTANCE_THRESHOLD:
+                    move_forward = SAT_TH_DISTANCE
+                elif D < SP_distance -FACING_DISTANCE_THRESHOLD:
+                    move_forward = -SAT_TH_DISTANCE
+            elif REG_CHOICE == 'PID':
+                Pmove_forward = PID_distance.compute(D, DT)
+                rotate = PID_angle.compute(A, DT)
+                move_forward = move_forawrd_saturation(move_forward)
+                rotate = rotate_saturation(rotate)
+            else:
+                break
+            out_data = {"vx":float(move_forward), "vy":0.0, "omega":float(rotate)}
+            out_msg = json.dumps(out_data, separators=(',', ':'))
+            mqttc.publish(MQTT_PUBLISH_TOPIC, out_msg, 0)
+    except KeyboardInterrupt:
+        print("Keyboard Interrupt.")
+        out_data = {"vx":float(0), "vy":0.0, "omega":float(0)}
         out_msg = json.dumps(out_data, separators=(',', ':'))
         mqttc.publish(MQTT_PUBLISH_TOPIC, out_msg, 0)
-    
+        break
 mqttc.loop_stop()

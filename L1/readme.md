@@ -1,2 +1,2 @@
-mosquitto -v -c "C:\Users\<twoja_nazwa>\Desktop\my_mosquitto.conf"
+mosquitto -v -c my_mosquitto.conf
 
