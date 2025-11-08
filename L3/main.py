@@ -9,7 +9,7 @@ import random
 # Fix for numpy compatibility
 np.int = int
 
-def getColours(cls_num):
+def getColors(cls_num):
     """Generate unique colors for each class ID"""
     random.seed(cls_num)
     return tuple(random.randint(0, 255) for _ in range(3))
@@ -61,12 +61,7 @@ def main(display_image, use_realsense):
     fps = 0.0
 
     # Load YOLO model
-    yolo = YOLO("monster_net_0.5.pt") # TODO test diffrent models
-
-    # 1 - good
-    # 2 - better but more false positives
-    # 3 - everything is false positive but monster is not monster
-    # 4 - nothing is monster
+    yolo = YOLO("monster_net_0.1.pt") # TODO test different models
 
 
     try:
@@ -111,7 +106,7 @@ def main(display_image, use_realsense):
 
                             conf = float(box.conf[0])
 
-                            colour = getColours(cls)
+                            colour = getColors(cls)
 
                             cv2.rectangle(color_image, (x1, y1), (x2, y2), colour, 2)
 
@@ -160,11 +155,23 @@ def main(display_image, use_realsense):
             cam.release()
         cv2.destroyAllWindows()
 
+def str2bool(v):
+    if isinstance(v, bool):
+        return v
+    if v.lower() in ('yes', 'true', 't', 'y', '1'):
+        return True
+    elif v.lower() in ('no', 'false', 'f', 'n', '0'):
+        return False
+    else:
+        raise argparse.ArgumentTypeError('Boolean value expected.')
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("-d", "--dont_display_image", default=False, type=bool)
-    parser.add_argument("-r", "--dont_use_realsense", default=False, help="Disable use of RealSense camera", type=bool)
+    parser.add_argument("-d", "--display_image", default=False, type=str2bool,
+                        help="Display image (True/False)")
+    parser.add_argument("-r", "--use_realsense", default=True, type=str2bool,
+                        help="Use a RealSense camera (True/False)")
 
     args = parser.parse_args()
 
-    main(display_image=args.dont_display_image, use_realsense=not(args.dont_use_realsense))
+    main(display_image=args.display_image, use_realsense=args.use_realsense)
