@@ -61,7 +61,11 @@ def main(display_image, use_realsense):
     fps = 0.0
 
     # Load YOLO model
-    yolo = YOLO("monster_net_0.1.pt") # TODO test different models
+    yolo = YOLO("monster_net_0.2.pt")
+
+    # Model notes:
+    # monster_net_0.2.pt - currently best
+    # monster_net_0.3.pt - more conservative model
 
 
     try:
@@ -106,7 +110,7 @@ def main(display_image, use_realsense):
 
                             conf = float(box.conf[0])
 
-                            colour = getColors(cls)
+                            colour = [48, 170, 73] # Monsterish colour
 
                             cv2.rectangle(color_image, (x1, y1), (x2, y2), colour, 2)
 

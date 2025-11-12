@@ -1,3 +1,4 @@
 .venv/
 runs/
 .vscode/
+yolov8n.pt
