@@ -2,8 +2,6 @@ Hello this is repo for laboratories
 
 Embedded Systems 2 na upelu - ES2_2025
 
-
-
 ## Project Overview
 The project is divided into several software layers, each with a well-defined interface.  
 Main goals:
@@ -64,7 +62,7 @@ Dataset link: [Monster Net on Roboflow](https://universe.roboflow.com/monster-nz
 
 | Name               | Responsibility                           | Layer         |
 |---------------------|-------------------------------------------|---------------|
-| Damian Brzana       | L1, remote controller, system architecture | L1            |
+| Damian Brzana       | L1, remote controller, system architecture, LL Arduino driver | L1            |
 | Oskar Brandys       | L2                                        | L2            |
 | Janusz Pawlicki     | accessories, neural network               | L3            |
 | Adrian Paś          | accessories, L2                           | L2            |
