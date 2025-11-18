@@ -1,43 +1,50 @@
-Oto przyk³ad jednego testu jednostkowego dla funkcji `omni4_inverse_kinematics`:
-
-```python
 import pytest
+from unittest.mock import patch, MagicMock
+from datetime import datetime
 import numpy as np
-
-from your_script_name import omni4_inverse_kinematics  # Zast¹p 'your_script_name' nazw¹ pliku zawieraj¹cego funkcjê
-
 def test_omni4_inverse_kinematics():
-    # Dane wejœciowe
-    vx = 0.2
-    vy = -0.1
-    omega = 0.5
-    v_max = 0.3
-    omega_max = 10.0
-
-    # Oczekiwane dane wyjœciowe (przyk³adowe, mog¹ byæ uzupe³nione na podstawie poprawnej implementacji)
-    expected_wheel_cmds = [(58, 1), (64, 1), (217, 0), (163, 0)]
-    expected_wheel_omegas = np.array([vx, vy, omega])
-
-    # Wywo³anie funkcji
-    wheel_cmds, wheel_omegas = omni4_inverse_kinematics(vx, vy, omega, v_max, omega_max)
-
-    # Sprawdzenie poprawnoœci wyników
-    assert len(wheel_cmds) == 4, "Funkcja powinna zwróciæ 4 pary (pwm, direction)"
-    for pwm, direction in wheel_cmds:
-        assert isinstance(pwm, int), "PWM powinien byæ liczb¹ ca³kowit¹"
-        assert direction in [0, 1], "Kierunek powinien byæ 0 lub 1"
-
-    np.testing.assert_almost_equal(wheel_omegas, expected_wheel_omegas, decimal=6)
-
-if __name__ == "__main__":
-    pytest.main()
-```
-
-Aby uruchomiæ ten test, zapisaæ go w pliku (np. `test_omni4_inverse_kinematics.py`) i uruchomiæ go za pomoc¹ narzêdzia `pytest`, np.:
-
-```sh
-pip install pytest
-pytest test_omni4_inverse_kinematics.py
-```
-
-Ten test sprawdza, czy funkcja `omni4_inverse_kinematics` zwraca poprawne pary (pwm, direction) oraz k¹towe prêdkoœci dla danych wejœciowych. Pamiêtaj, ¿e oczekiwane dane wyjœciowe (`expected_wheel_cmds` i `expected_wheel_omegas`) mog¹ musieæ byæ dostosowane do poprawnej implementacji funkcji.
+    # Normal case
+    wheel_cmds, _ = omni4_inverse_kinematics(0.1, 0.2, 0.3, v_max=0.5, omega_max=25.0)
+    assert len(wheel_cmds) == 4
+    # Edge case: vx, vy, omega are zero
+    wheel_cmds, _ = omni4_inverse_kinematics(0.0, 0.0, 0.0, v_max=0.5, omega_max=25.0)
+    assert all(cmd[0] == 0 for cmd in wheel_cmds)
+    # Edge case: max_omega_val exceeds omega_max
+    wheel_cmds, _ = omni4_inverse_kinematics(0.1, 0.2, 100.0, v_max=0.5, omega_max=25.0)
+    assert all(cmd[0] <= 255 for cmd in wheel_cmds)
+def test_on_connect():
+    client = MagicMock()
+    userdata = None
+    flags = None
+    rc = 0
+    on_connect(client, userdata, flags, rc)
+    assert client.subscribe.called_once_with("robot/cmd_vel")
+def test_on_message_valid_data():
+    global vx, vy, omega
+    msg = MagicMock()
+    msg.topic = "robot/cmd_vel"
+    msg.payload.decode.return_value = '{"vx": 0.1, "vy": 0.2, "omega": 0.3}'
+    on_message(None, None, msg)
+    assert vx == 0.1
+    assert vy == 0.2
+    assert omega == 0.3
+def test_on_message_invalid_data():
+    global vx, vy, omega
+    msg = MagicMock()
+    msg.topic = "robot/cmd_vel"
+    msg.payload.decode.return_value = '{"vx": "a", "vy": 0.2, "omega": 0.3}'
+    on_message(None, None, msg)
+    assert vx == 0.0
+    assert vy == 0.2
+    assert omega == 0.3
+def test_control_action():
+    wheel_cmds = [(128, 1), (64, 0), (192, 1), (127, 0)]
+    control_action(wheel_cmds)
+    expected_command = [255, 1, 212, 100, 254, 100, 384, 100]
+    assert ser.write.call_args[0][0] == bytearray(expected_command)
+def test_main_loop():
+    with patch('time.sleep') as mock_sleep:
+        with patch('omni4_inverse_kinematics', return_value=([], [])):
+            with patch('control_action'):
+                main()
+                mock_sleep.assert_called_with(1.0 / UPDATE_RATE_HZ)

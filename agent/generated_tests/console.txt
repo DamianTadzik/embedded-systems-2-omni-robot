@@ -1,0 +1,48 @@
+
+======================================================================
+🚀 AI TEST GENERATION AGENT – STARTED
+======================================================================
+
+======================================================================
+📁 SCANNING TARGET DIRECTORIES
+======================================================================
+Target directories:
+  - D:\Dane\Studia_AiR_semestr_9_10\embedded-systems-2-omni-robot\L1
+
+Found Python files:
+  ✓ D:\Dane\Studia_AiR_semestr_9_10\embedded-systems-2-omni-robot\L1\L1.py
+
+======================================================================
+🧪 GENERATING TESTS
+======================================================================
+
+→ Processing file: D:\Dane\Studia_AiR_semestr_9_10\embedded-systems-2-omni-robot\L1\L1.py
+  - Comments removed
+  - Code cleaned
+  - Sending code to AI model...
+  - AI response received
+  - Cleaned AI output
+  ✓ Saved cleaned tests → test_L1.py.py
+
+======================================================================
+✅ AI TEST GENERATION COMPLETE
+======================================================================
+Total time: 78.70 seconds
+
+📌 Generated test files:
+   - agent/generated_tests/test_L1.py
+
+📘 HOW TO RUN TESTS
+-----------------------------------------------------------
+Run all generated tests:
+   pytest agent/generated_tests -q
+
+Run tests with full output:
+   pytest agent/generated_tests
+
+Run a single test file:
+   pytest agent/generated_tests/test_<filename>.py -q
+
+
+Done.
+
