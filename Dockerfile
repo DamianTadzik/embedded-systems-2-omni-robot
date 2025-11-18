@@ -27,6 +27,7 @@ RUN apt-get update && apt-get install -y \
     libtool \
     pkg-config \
     libudev-dev \
+    mosquitto \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python and pip
@@ -39,13 +40,16 @@ RUN wget "https://www.python.org/ftp/python/3.9.0/Python-3.9.0.tgz" \
     && ln -s /usr/local/bin/pip3.9 /usr/local/bin/pip
 
 # Install Python libraries
-RUN pip install --no-cache-dir \
+RUN pip install --upgrade pip \
+    && pip install --no-cache-dir \
     numpy \
     opencv-python \
     pyrealsense2 \
     ultralytics \
     argparse \
-    random2
+    random2 \
+    lap \
+    paho-mqtt
 
 # Install RealSense SDK
 RUN git clone https://github.com/Microsoft/vcpkg.git \
@@ -60,6 +64,8 @@ WORKDIR /app
 # Download the code
 RUN git clone https://github.com/DamianTadzik/embedded-systems-2-omni-robot.git
 
-
+# Start Mosquitto broker
+RUN cd /app/embedded-systems-2-omni-robot/L1 \
+    && nohup mosquitto -v -c my_mosquitto.conf &
 
 CMD ["/bin/bash"]

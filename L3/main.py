@@ -7,6 +7,8 @@ from ultralytics import YOLO
 import random
 import logging
 logging.getLogger("ultralytics").setLevel(logging.ERROR)
+import paho.mqtt.client as mqtt
+import json
 
 # Fix for numpy compatibility
 np.int = int
@@ -20,6 +22,17 @@ def getColors(cls_num):
 def main(display_image, use_realsense):
     print("Starting the application...")
     print(f'Display image: {display_image}, Use RealSense: {use_realsense}')
+
+    # MQTT setup
+    MQTT_PUBLISH_TOPIC = "robot/nn_output"
+    MQTT_BROKER_IP = "localhost"
+
+    mqttc = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+    mqttc.connect(MQTT_BROKER_IP, 1883, 60)
+
+    mqttc.loop_start()
+
+
     if use_realsense:
         # --- Configure streams ---
         pipeline = rs.pipeline()
@@ -118,6 +131,10 @@ def main(display_image, use_realsense):
                             class_name += f" {distance_m:.2f} m"
                             print(f"distance: {distance_m:.2f} m")
 
+                            out_data = {"Cx":float((x1 + x2)//2), "Cy":float((y1 + y2)//2), "distance":float(distance_m)}
+                            out_msg = json.dumps(out_data, separators=(',', ':'))
+                            mqttc.publish(MQTT_PUBLISH_TOPIC, out_msg, 0)
+
                         if display_image:
                             colour = [48, 170, 73] # Monsterish colour
 
@@ -160,9 +177,11 @@ def main(display_image, use_realsense):
         pass
     finally:
         if use_realsense:
+            mqttc.loop_stop()
             pipeline.stop()
         else:
             cam.release()
+            mqttc.loop_stop()
         cv2.destroyAllWindows()
 
 def str2bool(v):
