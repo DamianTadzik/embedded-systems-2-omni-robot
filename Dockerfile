@@ -20,14 +20,23 @@ RUN apt-get update && apt-get install -y \
     zlib1g-dev \
     libgl1 \
     libusb-1.0-0-dev \
+    zip \
+    autoconf \
+    autoconf-archive \
+    automake \
+    libtool \
+    pkg-config \
+    libudev-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python and pip
-RUN wget "https://www.python.org/ftp/python/3.9.0/Python-3.9.0.tgz"
-RUN tar xvf Python-3.9.0.tgz
-RUN cd Python-3.9.0 && ./configure --enable-optimizations && make && make install
-
-RUN ln -s /usr/local/bin/pip3.9 /usr/local/bin/pip
+RUN wget "https://www.python.org/ftp/python/3.9.0/Python-3.9.0.tgz" \
+    && tar xvf Python-3.9.0.tgz \
+    && cd Python-3.9.0 \
+    && ./configure --enable-optimizations \
+    && make \
+    && make install \
+    && ln -s /usr/local/bin/pip3.9 /usr/local/bin/pip
 
 # Install Python libraries
 RUN pip install --no-cache-dir \
@@ -38,10 +47,17 @@ RUN pip install --no-cache-dir \
     argparse \
     random2
 
+# Install RealSense SDK
+RUN git clone https://github.com/Microsoft/vcpkg.git \
+    && cd vcpkg \
+    && ./bootstrap-vcpkg.sh \
+    && ./vcpkg integrate install \
+    && ./vcpkg install realsense2
+
 # Set working directory
 WORKDIR /app
 
-
+# Download the code
 RUN git clone https://github.com/DamianTadzik/embedded-systems-2-omni-robot.git
 
 
