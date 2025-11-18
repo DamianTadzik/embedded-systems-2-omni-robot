@@ -5,6 +5,8 @@ import argparse
 import pyrealsense2 as rs
 from ultralytics import YOLO
 import random
+import logging
+logging.getLogger("ultralytics").setLevel(logging.ERROR)
 
 # Fix for numpy compatibility
 np.int = int
@@ -46,8 +48,6 @@ def main(display_image, use_realsense):
         color_intr = color_stream.get_intrinsics()
         depth_intr = depth_stream.get_intrinsics()
 
-        print("[Color intrinsics]", color_intr)
-        print("[Depth intrinsics]", depth_intr)
     else:
         cam = cv2.VideoCapture(0)
 
@@ -98,31 +98,37 @@ def main(display_image, use_realsense):
             # Can detection and visualization
             results = yolo.track(color_image, stream=True)
 
-            if display_image:
-                for result in results:
-                    class_names = result.names
-                    for box in result.boxes:
-                        if box.conf[0] > 0.4 and box.cls[0] == 1:
-                            cls = int(box.cls[0])
-                            class_name = class_names[cls]
 
-                            x1, y1, x2, y2 = map(int, box.xyxy[0])
+            for result in results:
+                class_names = result.names
+                for box in result.boxes:
+                    if box.conf[0] > 0.4 and box.cls[0] == 1:
+                        cls = int(box.cls[0])
+                        class_name = class_names[cls]
 
-                            conf = float(box.conf[0])
+                        x1, y1, x2, y2 = map(int, box.xyxy[0])
 
+                        conf = float(box.conf[0])
+
+                        print(f"Detected {class_name} with confidence {conf:.2f} at "
+                              f"({x1}, {y1}), ({x2}, {y2})")
+
+                        if use_realsense:
+                            distance_m = depth_frame.get_distance((x1 + x2)//2, (y1 + y2)//2)
+                            class_name += f" {distance_m:.2f} m"
+                            print(f"distance: {distance_m:.2f} m")
+
+                        if display_image:
                             colour = [48, 170, 73] # Monsterish colour
 
                             cv2.rectangle(color_image, (x1, y1), (x2, y2), colour, 2)
-
-                            if use_realsense:
-                                distance_m = depth_frame.get_distance((x1 + x2)//2, (y1 + y2)//2)
-                                class_name += f" {distance_m:.2f} m"
 
                             cv2.putText(color_image, f"{class_name} {conf:.2f}",
                                         (x1, max(y1 - 10, 20)), cv2.FONT_HERSHEY_SIMPLEX,
                                         0.6, colour, 2)
 
 
+            if display_image:
                 if use_realsense:
                     # Add FPS to depth image as well
                     cv2.putText(depth_display, f"FPS: {fps:.1f}",
