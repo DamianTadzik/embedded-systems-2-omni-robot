@@ -19,18 +19,19 @@ def getColors(cls_num):
     return tuple(random.randint(0, 255) for _ in range(3))
 
 
-def main(display_image, use_realsense):
+def main(display_image, use_realsense, use_mqtt):
     print("Starting the application...")
-    print(f'Display image: {display_image}, Use RealSense: {use_realsense}')
+    print(f'Display image: {display_image}\nUse RealSense: {use_realsense} \nUse MQTT: {use_mqtt}')
 
     # MQTT setup
-    MQTT_PUBLISH_TOPIC = "robot/nn_output"
-    MQTT_BROKER_IP = "localhost"
+    if use_mqtt:
+        MQTT_PUBLISH_TOPIC = "robot/nn_output"
+        MQTT_BROKER_IP = "localhost"
 
-    mqttc = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
-    mqttc.connect(MQTT_BROKER_IP, 1883, 60)
+        mqttc = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+        mqttc.connect(MQTT_BROKER_IP, 1883, 60)
 
-    mqttc.loop_start()
+        mqttc.loop_start()
 
 
     if use_realsense:
@@ -74,7 +75,7 @@ def main(display_image, use_realsense):
     fps = 0.0
 
     # Load YOLO model
-    yolo = YOLO("monster_net_0.2.pt")
+    yolo = YOLO("./L3/monster_net_0.2.pt")
 
     # Model notes:
     # monster_net_0.2.pt - currently best
@@ -123,14 +124,16 @@ def main(display_image, use_realsense):
 
                         conf = float(box.conf[0])
 
-                        print(f"Detected {class_name} with confidence {conf:.2f} at "
-                              f"({x1}, {y1}), ({x2}, {y2})")
+                        distance_m = -1.0
 
                         if use_realsense:
                             distance_m = depth_frame.get_distance((x1 + x2)//2, (y1 + y2)//2)
                             class_name += f" {distance_m:.2f} m"
-                            print(f"distance: {distance_m:.2f} m")
 
+                        print(f"Detected {class_name} with confidence {conf:.2f} at "
+                              f"({x1}, {y1}), ({x2}, {y2}) {distance_m:.2f} m away.")
+
+                        if use_mqtt:
                             out_data = {"Cx":float((x1 + x2)//2), "Cy":float((y1 + y2)//2), "distance":float(distance_m)}
                             out_msg = json.dumps(out_data, separators=(',', ':'))
                             mqttc.publish(MQTT_PUBLISH_TOPIC, out_msg, 0)
@@ -177,10 +180,10 @@ def main(display_image, use_realsense):
         pass
     finally:
         if use_realsense:
-            mqttc.loop_stop()
             pipeline.stop()
         else:
             cam.release()
+        if use_mqtt:
             mqttc.loop_stop()
         cv2.destroyAllWindows()
 
@@ -200,7 +203,11 @@ if __name__ == "__main__":
                         help="Display image (True/False)")
     parser.add_argument("-r", "--use_realsense", default=True, type=str2bool,
                         help="Use a RealSense camera (True/False)")
+    parser.add_argument("-m", "--use_mqtt", default=False, type=str2bool,
+                        help="Use MQTT to publish data (True/False)")
 
     args = parser.parse_args()
 
-    main(display_image=args.display_image, use_realsense=args.use_realsense)
+    main(display_image=args.display_image,
+         use_realsense=args.use_realsense,
+         use_mqtt=args.use_mqtt)
