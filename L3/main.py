@@ -5,19 +5,35 @@ import argparse
 import pyrealsense2 as rs
 from ultralytics import YOLO
 import random
+import logging
+logging.getLogger("ultralytics").setLevel(logging.ERROR)
+import paho.mqtt.client as mqtt
+import json
 
 # Fix for numpy compatibility
 np.int = int
 
-def getColours(cls_num):
+def getColors(cls_num):
     """Generate unique colors for each class ID"""
     random.seed(cls_num)
     return tuple(random.randint(0, 255) for _ in range(3))
 
 
-def main(display_image, use_realsense):
+def main(display_image, use_realsense, use_mqtt):
     print("Starting the application...")
-    print(f'Display image: {display_image}, Use RealSense: {use_realsense}')
+    print(f'Display image: {display_image}\nUse RealSense: {use_realsense} \nUse MQTT: {use_mqtt}')
+
+    # MQTT setup
+    if use_mqtt:
+        MQTT_PUBLISH_TOPIC = "robot/nn_output"
+        MQTT_BROKER_IP = "localhost"
+
+        mqttc = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+        mqttc.connect(MQTT_BROKER_IP, 1883, 60)
+
+        mqttc.loop_start()
+
+
     if use_realsense:
         # --- Configure streams ---
         pipeline = rs.pipeline()
@@ -46,8 +62,6 @@ def main(display_image, use_realsense):
         color_intr = color_stream.get_intrinsics()
         depth_intr = depth_stream.get_intrinsics()
 
-        print("[Color intrinsics]", color_intr)
-        print("[Depth intrinsics]", depth_intr)
     else:
         cam = cv2.VideoCapture(0)
 
@@ -61,12 +75,11 @@ def main(display_image, use_realsense):
     fps = 0.0
 
     # Load YOLO model
-    yolo = YOLO("monster_net_0.5.pt") # TODO test diffrent models
+    yolo = YOLO("./L3/monster_net_0.2.pt")
 
-    # 1 - good
-    # 2 - better but more false positives
-    # 3 - everything is false positive but monster is not monster
-    # 4 - nothing is monster
+    # Model notes:
+    # monster_net_0.2.pt - currently best
+    # monster_net_0.3.pt - more conservative model
 
 
     try:
@@ -99,31 +112,43 @@ def main(display_image, use_realsense):
             # Can detection and visualization
             results = yolo.track(color_image, stream=True)
 
-            if display_image:
-                for result in results:
-                    class_names = result.names
-                    for box in result.boxes:
-                        if box.conf[0] > 0.4 and box.cls[0] == 1:
-                            cls = int(box.cls[0])
-                            class_name = class_names[cls]
 
-                            x1, y1, x2, y2 = map(int, box.xyxy[0])
+            for result in results:
+                class_names = result.names
+                for box in result.boxes:
+                    if box.conf[0] > 0.4 and box.cls[0] == 1:
+                        cls = int(box.cls[0])
+                        class_name = class_names[cls]
 
-                            conf = float(box.conf[0])
+                        x1, y1, x2, y2 = map(int, box.xyxy[0])
 
-                            colour = getColours(cls)
+                        conf = float(box.conf[0])
+
+                        distance_m = -1.0
+
+                        if use_realsense:
+                            distance_m = depth_frame.get_distance((x1 + x2)//2, (y1 + y2)//2)
+                            class_name += f" {distance_m:.2f} m"
+
+                        print(f"Detected {class_name} with confidence {conf:.2f} at "
+                              f"({x1}, {y1}), ({x2}, {y2}) {distance_m:.2f} m away.")
+
+                        if use_mqtt:
+                            out_data = {"Cx":float((x1 + x2)//2), "Cy":float((y1 + y2)//2), "distance":float(distance_m)}
+                            out_msg = json.dumps(out_data, separators=(',', ':'))
+                            mqttc.publish(MQTT_PUBLISH_TOPIC, out_msg, 0)
+
+                        if display_image:
+                            colour = [48, 170, 73] # Monsterish colour
 
                             cv2.rectangle(color_image, (x1, y1), (x2, y2), colour, 2)
-
-                            if use_realsense:
-                                distance_m = depth_frame.get_distance((x1 + x2)//2, (y1 + y2)//2)
-                                class_name += f" {distance_m:.2f} m"
 
                             cv2.putText(color_image, f"{class_name} {conf:.2f}",
                                         (x1, max(y1 - 10, 20)), cv2.FONT_HERSHEY_SIMPLEX,
                                         0.6, colour, 2)
 
 
+            if display_image:
                 if use_realsense:
                     # Add FPS to depth image as well
                     cv2.putText(depth_display, f"FPS: {fps:.1f}",
@@ -158,13 +183,31 @@ def main(display_image, use_realsense):
             pipeline.stop()
         else:
             cam.release()
+        if use_mqtt:
+            mqttc.loop_stop()
         cv2.destroyAllWindows()
+
+def str2bool(v):
+    if isinstance(v, bool):
+        return v
+    if v.lower() in ('yes', 'true', 't', 'y', '1'):
+        return True
+    elif v.lower() in ('no', 'false', 'f', 'n', '0'):
+        return False
+    else:
+        raise argparse.ArgumentTypeError('Boolean value expected.')
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("-d", "--dont_display_image", default=False, type=bool)
-    parser.add_argument("-r", "--dont_use_realsense", default=False, help="Disable use of RealSense camera", type=bool)
+    parser.add_argument("-d", "--display_image", default=False, type=str2bool,
+                        help="Display image (True/False)")
+    parser.add_argument("-r", "--use_realsense", default=True, type=str2bool,
+                        help="Use a RealSense camera (True/False)")
+    parser.add_argument("-m", "--use_mqtt", default=False, type=str2bool,
+                        help="Use MQTT to publish data (True/False)")
 
     args = parser.parse_args()
 
-    main(display_image=args.dont_display_image, use_realsense=not(args.dont_use_realsense))
+    main(display_image=args.display_image,
+         use_realsense=args.use_realsense,
+         use_mqtt=args.use_mqtt)
