@@ -131,7 +131,7 @@ def main(display_image, use_realsense, use_mqtt):
                             class_name += f" {distance_m:.2f} m"
 
                         print(f"Detected {class_name} with confidence {conf:.2f} at "
-                              f"({x1}, {y1}), ({x2}, {y2}) {distance_m:.2f} m away.")
+                              f"({x1}, {y1}), ({x2}, {y2}) {distance_m:.2f} m away. FPS: {fps:.1f}")
 
                         if use_mqtt:
                             out_data = {"Cx":float((x1 + x2)//2), "Cy":float((y1 + y2)//2), "distance":float(distance_m)}
