@@ -35,7 +35,7 @@ KD_DIST = 0
 MQTT_PUBLISH_TOPIC = "robot/cmd_vel"    # output
 # sending [vx, vy, omega] array containing translational (x,y) and rotatational velocities
 # in SI units (m/s, m/s, rad/s)
-MQTT_SUBSCRIBE_TOPIC = "robot/reg_input"    # input
+MQTT_SUBSCRIBE_TOPIC = "robot/nn_output"    # input
 # receiving distance from detected object (distance) and it's center placement
 # on the image (C)
 MQTT_BROKER_IP = "localhost"
