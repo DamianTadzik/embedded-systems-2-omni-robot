@@ -1,0 +1,4 @@
+(sym_lib_table
+  (version 7)
+  (lib (name "sterownik_silnikow")(type "KiCad")(uri "${KIPRJMOD}/sterownik_silnikow.kicad_sym")(options "")(descr ""))
+)
