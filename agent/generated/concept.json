@@ -1,0 +1,19 @@
+{
+  "system_overview": "The system consists of three layers: L1 (Motion Control Layer), L2 (Control and Integration Layer), and L3 (Perception Layer). L1 handles high-level velocity commands, L2 manages control and integration, and L3 implements the neural network for object detection. The robot is controlled via a web-based controller or an MQTT topic.",
+  "components": {
+    "L1": {
+      "tests": [
+        "Test inverse kinematics calculations for various input velocities to ensure accurate wheel speed commands.",
+        "Verify that the UART communication between L1 and LL layer functions correctly by sending test velocity commands and checking if the motors respond as expected.",
+        "Check the MQTT subscription functionality in L1 to ensure it receives control commands from the web-based controller or L2 layer."
+      ]
+    },
+    "L2": {
+      "tests": [
+        "Test the PID controller's ability to maintain a desired distance from the detected object by simulating various distances and checking if the robot adjusts its velocity accordingly.",
+        "Validate that the angle regulator correctly calculates translational velocities based on the object's center location in the frame of reference.",
+        "Ensure that L2 can handle both web-based control commands and direct MQTT commands from L1 layer without errors."
+      ]
+    }
+  }
+}
