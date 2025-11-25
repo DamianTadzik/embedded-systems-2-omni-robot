@@ -9,20 +9,14 @@ import logging
 logging.getLogger("ultralytics").setLevel(logging.ERROR)
 import paho.mqtt.client as mqtt
 import json
-from collections import deque
-import math
 
 # Fix for numpy compatibility
 np.int = int
 
-def get_color_for_id(id):
-    """Deterministic BGR color for a given track id"""
-    if id is None or id < 0:
-        return (48, 170, 73)
-    r = (id * 37) % 255
-    g = (id * 123) % 255
-    b = (id * 73) % 255
-    return (int(b), int(g), int(r))
+def getColors(cls_num):
+    """Generate unique colors for each class ID"""
+    random.seed(cls_num)
+    return tuple(random.randint(0, 255) for _ in range(3))
 
 
 def main(display_image, use_realsense, use_mqtt):
@@ -81,32 +75,13 @@ def main(display_image, use_realsense, use_mqtt):
     fps = 0.0
 
     # Load YOLO model
-    yolo = YOLO("./monster_net_0.2.pt")
+    yolo = YOLO("./L3/monster_net_0.2.pt")
 
     # Model notes:
     # monster_net_0.2.pt - currently best
-    # monster_net_0.3.pt - more conservative modell
+    # monster_net_0.3.pt - more conservative model
 
-# Global tracking state
-    selected_target = None          # Track ID we're following
-    lost_counter = 0                # How many frames it's been lost
-    MAX_LOST_FRAMES = 120            # After this, we drop tracking (shorter than before)
 
-    # Template-match fallback params
-    last_bbox = None                 # (x1,y1,x2,y2) of last known bbox
-    last_template = None             # last cropped template (BGR)
-    last_depth = None                # last measured depth at template center (meters)
-    last_centers = deque(maxlen=5)   # recent centers for simple motion check
-
-    TEMPLATE_MIN_SIZE = 20           # smallest template side to consider
-    TEMPLATE_MATCH_THRESH = 0.65     # normalized matchTemplate threshold (0..1) - raised
-    HIST_THRESH = 0.5                # HSV histogram correlation threshold (0..1)
-    SEARCH_EXPAND = 1.4              # expand search window by this factor (slightly smaller)
-    TEMPLATE_UPDATE_INTERVAL = 10    # frames before refreshing template from detection
-    MAX_SHIFT_PIXELS = 80            # reject matches that jump too far from recent motion
-    DEPTH_TOLERANCE = 0.35           # meters - require similar depth when using RealSense
-
-    template_age = 0
     try:
         while True:
             if use_realsense:
@@ -125,9 +100,7 @@ def main(display_image, use_realsense, use_mqtt):
                 color_image = np.asanyarray(color_frame.get_data())
             else:
                 ret, color_image = cam.read()
-                if not ret:
-                    # skip when camera read fails
-                    continue
+
 
             # FPS update
             frame_count += 1
@@ -139,210 +112,40 @@ def main(display_image, use_realsense, use_mqtt):
             # Can detection and visualization
             results = yolo.track(color_image, stream=True)
 
-            found_selected = False
 
             for result in results:
                 class_names = result.names
-
                 for box in result.boxes:
-                    conf = float(box.conf[0])
-                    cls = int(box.cls[0])
-
-                    if conf > 0.4 and cls == 1:   # Class 1 = Monster can
-
-                        # Extract track ID
-                        track_id = int(box.id[0]) if box.id is not None else -1
+                    if box.conf[0] > 0.4 and box.cls[0] == 1:
+                        cls = int(box.cls[0])
+                        class_name = class_names[cls]
 
                         x1, y1, x2, y2 = map(int, box.xyxy[0])
-                        cx = (x1 + x2) // 2
-                        cy = (y1 + y2) // 2
 
-                        # First time: lock onto first seen target
-                        if selected_target is None:
-                            selected_target = track_id
+                        conf = float(box.conf[0])
 
-                        # If this detection corresponds to selected target, use it
-                        if track_id == selected_target:
-                            found_selected = True
-                            lost_counter = 0  # reset lost flag
+                        distance_m = -1.0
 
-                            # Save last bbox and template for fallback tracking
-                            last_bbox = (x1, y1, x2, y2)
-                            template_age = 0
-                            w = x2 - x1
-                            h = y2 - y1
-                            if w >= TEMPLATE_MIN_SIZE and h >= TEMPLATE_MIN_SIZE:
-                                last_template = color_image[y1:y2, x1:x2].copy()
+                        if use_realsense:
+                            distance_m = depth_frame.get_distance((x1 + x2)//2, (y1 + y2)//2)
+                            class_name += f" {distance_m:.2f} m"
 
-                            # Depth reading
-                            distance_m = None
-                            if use_realsense and depth_frame:
-                                try:
-                                    distance_m = float(depth_frame.get_distance(cx, cy))
-                                    last_depth = distance_m
-                                except:
-                                    distance_m = None
+                        print(f"Detected {class_name} with confidence {conf:.2f} at "
+                              f"({x1}, {y1}), ({x2}, {y2}) {distance_m:.2f} m away.")
 
-                            # update recent centers
-                            last_centers.append((cx, cy))
-
-                            # Publish minimal target data
-                            if use_mqtt:
-                                out_data = {
-                                    "Cx": float(cx),
-                                    "Cy": float(cy),
-                                    "distance": float(distance_m) if distance_m is not None else None
-                                }
-                                out_msg = json.dumps(out_data, separators=(',', ':'))
-                                mqttc.publish(MQTT_PUBLISH_TOPIC, out_msg, 0)
-
-                            # Show tracking on screen
-                            if display_image:
-                                color = get_color_for_id(selected_target)
-                                cv2.rectangle(color_image, (x1, y1), (x2, y2), color, 2)
-                                label = f"ID:{selected_target} {distance_m:.2f}m" if use_realsense and distance_m is not None else f"ID:{selected_target}"
-                                cv2.putText(color_image, label,
-                                            (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX,
-                                            0.6, color, 2)
-
-            # If selected target wasn't found by detector, try template-match fallback
-            if selected_target is not None and not found_selected and last_template is not None and last_bbox is not None:
-                template_age += 1
-
-                ih, iw = color_image.shape[:2]
-                x1, y1, x2, y2 = last_bbox
-                bw = x2 - x1
-                bh = y2 - y1
-
-                # Build expanded search window around last bbox
-                cx = (x1 + x2) // 2
-                cy = (y1 + y2) // 2
-                sw = int(min(iw, max(bw * SEARCH_EXPAND, bw + 20)))
-                sh = int(min(ih, max(bh * SEARCH_EXPAND, bh + 20)))
-                sx1 = max(0, cx - sw // 2)
-                sy1 = max(0, cy - sh // 2)
-                sx2 = min(iw, sx1 + sw)
-                sy2 = min(ih, sy1 + sh)
-
-                search_region = color_image[sy1:sy2, sx1:sx2]
-                ok_size = (search_region.size > 0 and last_template.size > 0 and
-                           last_template.shape[0] < search_region.shape[0] and last_template.shape[1] < search_region.shape[1])
-
-                if ok_size:
-                    # Use grayscale normalized cross-correlation
-                    search_gray = cv2.cvtColor(search_region, cv2.COLOR_BGR2GRAY)
-                    tpl_gray = cv2.cvtColor(last_template, cv2.COLOR_BGR2GRAY)
-
-                    try:
-                        res = cv2.matchTemplate(search_gray, tpl_gray, cv2.TM_CCOEFF_NORMED)
-                        _, max_val, _, max_loc = cv2.minMaxLoc(res)
-                    except Exception:
-                        max_val = 0
-                        max_loc = (0, 0)
-
-                    # Basic HSV histogram similarity check to reduce false positives
-                    cand_x, cand_y = max_loc
-                    cand_x_full = sx1 + cand_x
-                    cand_y_full = sy1 + cand_y
-                    nx1 = cand_x_full
-                    ny1 = cand_y_full
-                    nx2 = nx1 + last_template.shape[1]
-                    ny2 = ny1 + last_template.shape[0]
-
-                    hist_ok = False
-                    try:
-                        tpl_hsv = cv2.cvtColor(last_template, cv2.COLOR_BGR2HSV)
-                        cand_patch = color_image[ny1:ny2, nx1:nx2]
-                        if cand_patch.shape[:2] == tpl_hsv.shape[:2]:
-                            cand_hsv = cv2.cvtColor(cand_patch, cv2.COLOR_BGR2HSV)
-                            h_bins = 50
-                            s_bins = 60
-                            tpl_hist = cv2.calcHist([tpl_hsv], [0, 1], None, [h_bins, s_bins], [0, 180, 0, 256])
-                            cand_hist = cv2.calcHist([cand_hsv], [0, 1], None, [h_bins, s_bins], [0, 180, 0, 256])
-                            cv2.normalize(tpl_hist, tpl_hist, 0, 1, cv2.NORM_MINMAX)
-                            cv2.normalize(cand_hist, cand_hist, 0, 1, cv2.NORM_MINMAX)
-                            hist_score = cv2.compareHist(tpl_hist, cand_hist, cv2.HISTCMP_CORREL)
-                            hist_ok = (hist_score >= HIST_THRESH)
-                        else:
-                            hist_ok = False
-                    except Exception:
-                        hist_ok = False
-
-                    # depth and motion checks
-                    center_new = ((nx1 + nx2) // 2, (ny1 + ny2) // 2)
-                    shift = math.hypot(center_new[0] - ((x1 + x2)//2), center_new[1] - ((y1 + y2)//2))
-                    motion_ok = True
-                    if last_centers:
-                        # require not too far from recent motion (prevents long jumps)
-                        avg_cx = int(sum(c[0] for c in last_centers) / len(last_centers))
-                        avg_cy = int(sum(c[1] for c in last_centers) / len(last_centers))
-                        motion_ok = (math.hypot(center_new[0]-avg_cx, center_new[1]-avg_cy) <= max(MAX_SHIFT_PIXELS, bw*1.5))
-
-                    depth_ok = True
-                    if use_realsense and depth_frame and last_depth is not None:
-                        try:
-                            d_new = float(depth_frame.get_distance(center_new[0], center_new[1]))
-                            depth_ok = (abs(d_new - last_depth) <= DEPTH_TOLERANCE)
-                        except:
-                            depth_ok = True
-
-                    # Accept match only if combined checks pass
-                    if max_val >= TEMPLATE_MATCH_THRESH and hist_ok and motion_ok and depth_ok:
-                        # Found a good match; compute new bbox in full image coords
-                        last_bbox = (nx1, ny1, nx2, ny2)
-                        if template_age >= TEMPLATE_UPDATE_INTERVAL:
-                            w = nx2 - nx1
-                            h = ny2 - ny1
-                            if w >= TEMPLATE_MIN_SIZE and h >= TEMPLATE_MIN_SIZE:
-                                last_template = color_image[ny1:ny2, nx1:nx2].copy()
-                            template_age = 0
-
-                        found_selected = True
-                        lost_counter = 0
-
-                        # Depth reading
-                        cx = (nx1 + nx2) // 2
-                        cy = (ny1 + ny2) // 2
-                        if use_realsense and depth_frame:
-                            try:
-                                last_depth = float(depth_frame.get_distance(cx, cy))
-                            except:
-                                pass
-
-                        last_centers.append((cx, cy))
-
-                        # Publish if needed
                         if use_mqtt:
-                            out_data = {
-                                "Cx": float(cx),
-                                "Cy": float(cy),
-                                "distance": float(last_depth) if last_depth is not None else None,
-                                "id": int(selected_target),
-                                "match": float(max_val)
-                            }
-                            mqttc.publish(MQTT_PUBLISH_TOPIC, json.dumps(out_data, separators=(',', ':')), 0)
+                            out_data = {"Cx":float((x1 + x2)//2), "Cy":float((y1 + y2)//2), "distance":float(distance_m)}
+                            out_msg = json.dumps(out_data, separators=(',', ':'))
+                            mqttc.publish(MQTT_PUBLISH_TOPIC, out_msg, 0)
 
-                        # Draw fallback bbox
                         if display_image:
-                            color = get_color_for_id(selected_target)
-                            cv2.rectangle(color_image, (nx1, ny1), (nx2, ny2), color, 2)
-                            cv2.putText(color_image, f"ID:{selected_target} (templ:{max_val:.2f})",
-                                        (nx1, ny1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+                            colour = [48, 170, 73] # Monsterish colour
 
-                # If template matching failed, increment lost counter below
+                            cv2.rectangle(color_image, (x1, y1), (x2, y2), colour, 2)
 
-            # After iterating detections & fallback, handle lost logic
-            if selected_target is not None and not found_selected:
-                lost_counter += 1
-                if lost_counter > MAX_LOST_FRAMES:
-                    print("Lost target, resetting tracking...")
-                    selected_target = None
-                    last_bbox = None
-                    last_template = None
-                    last_depth = None
-                    last_centers.clear()
-                    lost_counter = 0
-                    template_age = 0
+                            cv2.putText(color_image, f"{class_name} {conf:.2f}",
+                                        (x1, max(y1 - 10, 20)), cv2.FONT_HERSHEY_SIMPLEX,
+                                        0.6, colour, 2)
 
 
             if display_image:
