@@ -9,6 +9,7 @@ import logging
 logging.getLogger("ultralytics").setLevel(logging.ERROR)
 import paho.mqtt.client as mqtt
 import json
+from utils.rs_utils import get_bbox_distance_percentile
 
 # Fix for numpy compatibility
 np.int = int
@@ -127,11 +128,11 @@ def main(display_image, use_realsense, use_mqtt):
                         distance_m = -1.0
 
                         if use_realsense:
-                            distance_m = depth_frame.get_distance((x1 + x2)//2, (y1 + y2)//2)
+                            distance_m = get_bbox_distance_percentile(depth_frame, x1, y1, x2, y2, percentile=80)
                             class_name += f" {distance_m:.2f} m"
 
                         print(f"Detected {class_name} with confidence {conf:.2f} at "
-                              f"({x1}, {y1}), ({x2}, {y2}) {distance_m:.2f} m away. FPS: {fps:.1f}")
+                              f"({x1}, {y1}), ({x2}, {y2}) {distance_m:.2f} m away. FPS: {fps:.1f}") # Debug
 
                         if use_mqtt:
                             out_data = {"Cx":float((x1 + x2)//2), "Cy":float((y1 + y2)//2), "distance":float(distance_m)}
