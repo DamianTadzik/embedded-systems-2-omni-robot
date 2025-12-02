@@ -6,7 +6,12 @@ def open_serial(port="/dev/ttyACM0", baud=230400):
     return serial.Serial(port, baud, timeout=0.05)
 
 def send_wheel_command(ser, cmds):
-    # cmds = [(pwm, dir), ...]
+    """    
+    Sends a command frame to the robot with the desired wheel speeds.
+
+    :param ser: Serial object
+    :param omegas: cmds is four-element array-like of wheel PWMs in range [-127, 127]
+    """    
     signed = []
     for speed, direction in cmds:
         percent = (speed / 255.0) * 100.0
@@ -61,21 +66,58 @@ def read_encoders(ser):
 
 
 import threading
-latest_encoders = {
-        "tl": 0.0, 
-        "tr": 0.0,
-        "bl": 0.0,
-        "br": 0.0
-        }
+import time
+import math
+encoders_feedback = {
+    # raw encoder counts
+    "tl": 0.0, "tr": 0.0,
+    "bl": 0.0, "br": 0.0,
+
+    # angular speeds [rad/s]
+    "wtl": 0.0, "wtr": 0.0,
+    "wbl": 0.0, "wbr": 0.0,
+
+    # loop delta time
+    "dt": 0.0    
+}
+CPR = 230
+RAD_PER_COUNT = 2 * math.pi / CPR
+
 def serial_reader_task(ser):
-    global latest_encoders
+    last_time = time.time()
+    last_enc = None
+
     while True:
-        enc = read_encoders(ser)
-        if enc:    
-            latest_encoders["tl"] = enc[0]
-            latest_encoders["tr"] = enc[1]
-            latest_encoders["bl"] = enc[2]
-            latest_encoders["br"] = enc[3]
+        enc = read_encoders(ser)   # returns [tl, tr, bl, br]
+        if not enc:
+            continue
+
+        # dt
+        now = time.time()
+        dt = now - last_time
+        last_time = now
+        encoders_feedback["dt"] = dt
+
+        # raw counts
+        tl, tr, bl, br = enc
+        encoders_feedback["tl"] = tl
+        encoders_feedback["tr"] = tr
+        encoders_feedback["bl"] = bl
+        encoders_feedback["br"] = br
+
+        # speeds
+        if last_enc is not None:
+            encoders_feedback["wtl"] = (tl - last_enc[0]) / dt * RAD_PER_COUNT
+            encoders_feedback["wtr"] = (tr - last_enc[1]) / dt * RAD_PER_COUNT
+            encoders_feedback["wbl"] = (bl - last_enc[2]) / dt * RAD_PER_COUNT
+            encoders_feedback["wbr"] = (br - last_enc[3]) / dt * RAD_PER_COUNT
+        else:
+            encoders_feedback["wtl"] = 0.0
+            encoders_feedback["wtr"] = 0.0
+            encoders_feedback["wbl"] = 0.0
+            encoders_feedback["wbr"] = 0.0
+
+        last_enc = enc
 
 def start_serial_reader(ser):
     th = threading.Thread(target=serial_reader_task, args=(ser,), daemon=True)

@@ -1,6 +1,6 @@
 import numpy as np
 
-def omni4_inverse_kinematics(vx, vy, omega, v_max, omega_max):
+def omni4_inverse_kinematics(vx, vy, omega, max_wheel_omega_rad_per_s=1.0):
     """
     Compute wheel speeds and directions for 4-wheel omni (mecanum) robot.
 
@@ -31,16 +31,10 @@ def omni4_inverse_kinematics(vx, vy, omega, v_max, omega_max):
     # Obliczenie prędkości kątowych kół [rad/s]
     wheel_omegas = (1 / r) * M @ np.array([vx, vy, omega])
 
-    # Normalizacja prędkości, jeśli przekracza maksymalne wartości
-    max_omega_val = np.max(np.abs(wheel_omegas))
-    if max_omega_val > omega_max:
-        wheel_omegas = wheel_omegas * (omega_max / max_omega_val)
+    # limit handling (scaling all wheels proportionally)
+    max_omega = np.max(np.abs(wheel_omegas))
+    if max_omega > max_wheel_omega_rad_per_s:
+        scale = max_wheel_omega_rad_per_s / max_omega
+        wheel_omegas *= scale
 
-    # Konwersja na sygnały sterujące (PWM, kierunek)
-    wheel_cmds = []
-    for w in wheel_omegas:
-        direction = 1 if w >= 0 else 0
-        pwm = int(np.clip(abs(w) / omega_max * 255, 0, 255))
-        wheel_cmds.append((pwm, direction))
-
-    return wheel_cmds, wheel_omegas  # [(pwm1, dir1), (pwm2, dir2), (pwm3, dir3), (pwm4, dir4)]
+    return wheel_omegas
