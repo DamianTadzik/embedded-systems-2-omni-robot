@@ -11,10 +11,11 @@ MQTT_PORT = 1883            # klasyczny port MQTT
 client = start_mqtt(broker=MQTT_BROKER, port=MQTT_PORT)
 
 # === Serial link do mikrokontrolera ===
-from serial_link import open_serial, send_wheel_command
+from serial_link import open_serial, send_wheel_command, start_serial_reader, latest_encoders
 SERIAL_PORT = "/dev/ttyACM0"
 SERIAL_BAUD = 230400
 serial = open_serial(port=SERIAL_PORT, baud=SERIAL_BAUD)
+start_serial_reader(serial)
 
 # === Główna pętla sterująca ===
 v_max = 0.5
@@ -32,4 +33,8 @@ while True:
     wheel_cmds, wheel_omegas = omni4_inverse_kinematics(vx, vy, omega, v_max, omega_max)
 
     send_wheel_command(serial, wheel_cmds)
+
+    if latest_encoders:
+        print("ENC:", latest_encoders)
+
     time.sleep(dt)
