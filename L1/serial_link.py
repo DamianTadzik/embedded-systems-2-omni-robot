@@ -81,6 +81,12 @@ encoders_feedback = {
 CPR = 230
 RAD_PER_COUNT = 2 * math.pi / CPR
 
+def diff_16bit(curr, last):
+    d = (curr - last) & 0xFFFF   # wrap-around
+    if d > 32767:                # interpret as negative (two's complement)
+        d -= 65536
+    return d
+
 def serial_reader_task(ser):
     last_time = time.time()
     last_enc = None
@@ -105,10 +111,15 @@ def serial_reader_task(ser):
 
         # speeds
         if last_enc is not None:
-            encoders_feedback["wtl"] = (tl - last_enc[0]) / dt * RAD_PER_COUNT
-            encoders_feedback["wtr"] = (tr - last_enc[1]) / dt * RAD_PER_COUNT
-            encoders_feedback["wbl"] = (bl - last_enc[2]) / dt * RAD_PER_COUNT
-            encoders_feedback["wbr"] = (br - last_enc[3]) / dt * RAD_PER_COUNT
+            dtl = diff_16bit(tl, last_enc[0])
+            dtr = diff_16bit(tr, last_enc[1])
+            dbl = diff_16bit(bl, last_enc[2])
+            dbr = diff_16bit(br, last_enc[3])
+
+            encoders_feedback["wtl"] = (dtl) / dt * RAD_PER_COUNT
+            encoders_feedback["wtr"] = (dtr) / dt * RAD_PER_COUNT
+            encoders_feedback["wbl"] = (dbl) / dt * RAD_PER_COUNT
+            encoders_feedback["wbr"] = (dbr) / dt * RAD_PER_COUNT
         else:
             encoders_feedback["wtl"] = 0.0
             encoders_feedback["wtr"] = 0.0

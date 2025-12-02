@@ -22,10 +22,10 @@ dt = 1.0 / 10
 
 # === PID controllers for closed-loop wheel speed control ===
 from PID import PID
-pid_tl = PID( kp=1.2, ki=0.8, kd=0.0, output_limit=127 )
-pid_tr = PID( kp=1.2, ki=0.8, kd=0.0, output_limit=127 )
-pid_bl = PID( kp=1.2, ki=0.8, kd=0.0, output_limit=127 )
-pid_br = PID( kp=1.2, ki=0.8, kd=0.0, output_limit=127 )
+pid_tl = PID( kp=1.2, ki=12.0, kd=0.04, output_limit=127 )
+pid_tr = PID( kp=1.2, ki=12.0, kd=0.04, output_limit=127 )
+pid_bl = PID( kp=1.2, ki=12.0, kd=0.04, output_limit=127 )
+pid_br = PID( kp=1.2, ki=12.0, kd=0.04, output_limit=127 )
 
 time.sleep(2)
 while True:
