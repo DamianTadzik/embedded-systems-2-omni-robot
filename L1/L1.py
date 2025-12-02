@@ -63,14 +63,13 @@ while True:
             pwm = int(max(-127, min(127, w*50)))  # Simple linear mapping
             duty_cycles.append(pwm)
 
-   
     if True:
         # PID outputs mapped directly to PWM
-        dt = encoders_feedback["dt"]
-        u_tl = pid_tl.update(rwtl, wtl, dt)
-        u_tr = pid_tr.update(rwtr, wtr, dt)
-        u_bl = pid_bl.update(rwbl, wbl, dt)
-        u_br = pid_br.update(rwbr, wbr, dt)
+        dt_feedback = encoders_feedback["dt"]
+        u_tl = pid_tl.update(rwtl, wtl, dt_feedback)
+        u_tr = pid_tr.update(rwtr, wtr, dt_feedback)
+        u_bl = pid_bl.update(rwbl, wbl, dt_feedback)
+        u_br = pid_br.update(rwbr, wbr, dt_feedback)
 
         duty_cycles = [
             int(u_tl),
