@@ -38,21 +38,21 @@ while True:
     wtr = encoders_feedback["wtr"]
     wbl = encoders_feedback["wbl"]
     wbr = encoders_feedback["wbr"]
-    print(f"\t[ENC SPD] {wtl:.2f} rad/s, {wtr:.2f} rad/s, {wbl:.2f} rad/s, {wbr:.2f} rad/s")
+    print(f"\t[ENC SPD] {wtl=:.2f} rad/s, {wtr=:.2f} rad/s, {wbl=:.2f} rad/s, {wbr=:.2f} rad/s")
 
-    omegas = omni4_inverse_kinematics(vx, vy, omega, max_wheel_omega_rad_per_s=1.0)
+    omegas = omni4_inverse_kinematics(vx, vy, omega, max_wheel_omega_rad_per_s=10.0)
     
     rwtl = omegas[0]
     rwtr = omegas[1]
     rwbl = omegas[2]
     rwbr = omegas[3]
-    print(f"\t[REQ WH SPD] {rwtl:.2f} rad/s, {rwtr:.2f} rad/s, {rwbl:.2f} rad/s, {rwbr:.2f} rad/s")
+    print(f"\t[REQ WH SPD] {rwtl=:.2f} rad/s, {rwtr=:.2f} rad/s, {rwbl=:.2f} rad/s, {rwbr=:.2f} rad/s")
 
     # OPEN LOOP CONTROL - map wheel angular velocities to PWM duty cycles
     # Now map the omegas to PWM commands in range [-127, 127]
     duty_cycles = []
     for w in omegas:
-        pwm = int(max(-127, min(127, w * 127)))  # Simple linear mapping
+        pwm = int(max(-127, min(127, w*50)))  # Simple linear mapping
         duty_cycles.append(pwm)
 
     dctl = duty_cycles[0]

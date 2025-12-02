@@ -13,17 +13,15 @@ def send_wheel_command(ser, cmds):
     :param omegas: cmds is four-element array-like of wheel PWMs in range [-127, 127]
     """    
     signed = []
-    for speed, direction in cmds:
-        percent = (speed / 255.0) * 100.0
-        if direction == 0:
-            percent *= -1
+    for speed in cmds:
+        percent = (speed / 127.0) * 100.0
         signed.append(int(percent))
 
     frame = bytearray(6)
     frame[0] = START
-    frame[1] = signed[0] & 0xFF
+    frame[1] = -signed[0] & 0xFF
     frame[2] = signed[1] & 0xFF
-    frame[3] = signed[2] & 0xFF
+    frame[3] = -signed[2] & 0xFF
     frame[4] = signed[3] & 0xFF
     checksum = (START + frame[1] + frame[2] + frame[3] + frame[4]) & 0xFF
     frame[5] = checksum
