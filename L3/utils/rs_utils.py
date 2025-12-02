@@ -2,7 +2,7 @@ import numpy as np
 
 # Vibe coded section begins
 
-def get_bbox_distance_percentile(depth_frame, x1, y1, x2, y2, percentile=80):
+def get_bbox_distance_percentile(depth_frame, x1, y1, x2, y2, percentile=20):
     depth_image = np.asanyarray(depth_frame.get_data())
 
     h, w = depth_image.shape
