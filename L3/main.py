@@ -9,7 +9,6 @@ import logging
 logging.getLogger("ultralytics").setLevel(logging.ERROR)
 import paho.mqtt.client as mqtt
 import json
-from utils.rs_utils import get_bbox_distance_percentile
 
 # Fix for numpy compatibility
 np.int = int
@@ -136,8 +135,12 @@ def main(display_image, use_realsense, use_mqtt):
                                 last_template = color_image[y1:y2, x1:x2].copy()
 
                             # 💡 TU jest logika łączona — używamy Twojej funkcji get_bbox_distance_percentile
-                            distance_m = get_bbox_distance_percentile(depth_frame, x1, y1, x2, y2, percentile=80) \
-                                if use_realsense else -1
+                            if use_realsense:
+                                distance_m = depth_frame.get_distance((x1 + x2)//2, (y1 + y2)//2)
+                                class_name += f" {distance_m:.2f} m"
+
+                                print(f"Detected {class_name} with confidence {conf:.2f} at "
+                                f"({x1}, {y1}), ({x2}, {y2}) {distance_m:.2f} m away. FPS: {fps:.1f}")
 
                             # MQTT
                             if use_mqtt:
@@ -201,16 +204,18 @@ def main(display_image, use_realsense, use_mqtt):
                         found_selected = True
                         lost_counter = 0
 
-                        distance_m = get_bbox_distance_percentile(depth_frame, nx1, ny1, nx2, ny2, 80) \
-                            if use_realsense else -1
+                        if use_realsense:
+                                distance_m = depth_frame.get_distance((x1 + x2)//2, (y1 + y2)//2)
+                                class_name += f" {distance_m:.2f} m"
+
+                                print(f"Detected {class_name} with confidence {conf:.2f} at "
+                                f"({x1}, {y1}), ({x2}, {y2}) {distance_m:.2f} m away. FPS: {fps:.1f}")
 
                         if use_mqtt:
                             out_data = {
                                 "Cx": float((nx1 + nx2) // 2),
                                 "Cy": float((ny1 + ny2) // 2),
                                 "distance": float(distance_m),
-                                "id": int(selected_target),
-                                "match": float(max_val)
                             }
                             mqttc.publish(MQTT_PUBLISH_TOPIC, json.dumps(out_data, separators=(',', ':')), 0)
 
