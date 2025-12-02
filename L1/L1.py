@@ -20,6 +20,13 @@ start_serial_reader(serial)
 # === Główna pętla sterująca ===
 dt = 1.0 / 10
 
+# === PID controllers for closed-loop wheel speed control ===
+from PID import PID
+pid_tl = PID( kp=1.2, ki=0.8, kd=0.0, output_limit=127 )
+pid_tr = PID( kp=1.2, ki=0.8, kd=0.0, output_limit=127 )
+pid_bl = PID( kp=1.2, ki=0.8, kd=0.0, output_limit=127 )
+pid_br = PID( kp=1.2, ki=0.8, kd=0.0, output_limit=127 )
+
 time.sleep(2)
 while True:
     ts = datetime.now().strftime("%H:%M:%S.%f")[:-3]
@@ -48,12 +55,30 @@ while True:
     rwbr = omegas[3]
     print(f"\t[REQ WH SPD] {rwtl=:.2f} rad/s, {rwtr=:.2f} rad/s, {rwbl=:.2f} rad/s, {rwbr=:.2f} rad/s")
 
-    # OPEN LOOP CONTROL - map wheel angular velocities to PWM duty cycles
-    # Now map the omegas to PWM commands in range [-127, 127]
-    duty_cycles = []
-    for w in omegas:
-        pwm = int(max(-127, min(127, w*50)))  # Simple linear mapping
-        duty_cycles.append(pwm)
+    if False:
+        # OPEN LOOP CONTROL - map wheel angular velocities to PWM duty cycles
+        # Now map the omegas to PWM commands in range [-127, 127], 127 = full forward, -127 = full reverse
+        duty_cycles = []
+        for w in omegas:
+            pwm = int(max(-127, min(127, w*50)))  # Simple linear mapping
+            duty_cycles.append(pwm)
+
+   
+    if True:
+        # PID outputs mapped directly to PWM
+        dt = encoders_feedback["dt"]
+        u_tl = pid_tl.update(rwtl, wtl, dt)
+        u_tr = pid_tr.update(rwtr, wtr, dt)
+        u_bl = pid_bl.update(rwbl, wbl, dt)
+        u_br = pid_br.update(rwbr, wbr, dt)
+
+        duty_cycles = [
+            int(u_tl),
+            int(u_tr),
+            int(u_bl),
+            int(u_br)
+        ]
+
 
     dctl = duty_cycles[0]
     dctr = duty_cycles[1]
