@@ -54,19 +54,28 @@ def read_encoders(ser):
                 data[6] + data[7]) & 0xFF
 
     if checksum != data[8]:
+        print(f"[WARNING] {checksum=} {data[8]=}")
         return None
 
     return (tl, tr, bl, br)
 
 
 import threading
-latest_encoders = None
+latest_encoders = {
+        "tl": 0.0, 
+        "tr": 0.0,
+        "bl": 0.0,
+        "br": 0.0
+        }
 def serial_reader_task(ser):
     global latest_encoders
     while True:
         enc = read_encoders(ser)
-        if enc:
-            latest_encoders = enc
+        if enc:    
+            latest_encoders["tl"] = enc[0]
+            latest_encoders["tr"] = enc[1]
+            latest_encoders["bl"] = enc[2]
+            latest_encoders["br"] = enc[3]
 
 def start_serial_reader(ser):
     th = threading.Thread(target=serial_reader_task, args=(ser,), daemon=True)

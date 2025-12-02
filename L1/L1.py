@@ -29,12 +29,16 @@ while True:
     vy = state["vy"]
     omega = state["omega"]
     print(f"[{ts}] {vx=:.2f} m/s, {vy=:.2f} m/s, {omega=:.2f} rad/s")
+    
+    tl = latest_encoders["tl"]
+    tr = latest_encoders["tr"]
+    bl = latest_encoders["bl"]
+    br = latest_encoders["br"]
+    print(f"\t[ENC] {tl=} {tr=} {bl=} {br=}")
 
     wheel_cmds, wheel_omegas = omni4_inverse_kinematics(vx, vy, omega, v_max, omega_max)
 
     send_wheel_command(serial, wheel_cmds)
 
-    if latest_encoders:
-        print("ENC:", latest_encoders)
 
     time.sleep(dt)
