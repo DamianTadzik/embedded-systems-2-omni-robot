@@ -122,7 +122,7 @@ void sendEncodersFrame() {
   frame[8] = (uint8_t)((br >> 8) & 0xFF);
 
   // Kalkulacja sumy kontrolnej
-  uint8_t checksum = 0x55;
+  uint8_t checksum = 0xAA;
   for (int i = 1; i <= 8; i++) {
     checksum += frame[i];
   }
