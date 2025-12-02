@@ -39,8 +39,8 @@ def main(display_image, use_realsense, use_mqtt):
         pipeline = rs.pipeline()
         config = rs.config()
         # Enable depth and color; change resolutions if needed
-        config.enable_stream(rs.stream.depth, 640, 480,  rs.format.z16, 30)
-        config.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, 30)
+        config.enable_stream(rs.stream.depth, 640, 480,  rs.format.z16, 15)
+        config.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, 15)
 
         # Start streaming
         profile = pipeline.start(config)
@@ -131,7 +131,7 @@ def main(display_image, use_realsense, use_mqtt):
                             class_name += f" {distance_m:.2f} m"
 
                         print(f"Detected {class_name} with confidence {conf:.2f} at "
-                              f"({x1}, {y1}), ({x2}, {y2}) {distance_m:.2f} m away.")
+                              f"({x1}, {y1}), ({x2}, {y2}) {distance_m:.2f} m away. FPS: {fps:.1f}")
 
                         if use_mqtt:
                             out_data = {"Cx":float((x1 + x2)//2), "Cy":float((y1 + y2)//2), "distance":float(distance_m)}
