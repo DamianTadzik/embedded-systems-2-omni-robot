@@ -117,6 +117,7 @@ def main(display_image, use_realsense, use_mqtt):
                     cls = int(box.cls[0])
 
                     if conf > 0.4 and cls == 1:
+                        class_name = class_names[cls]
                         track_id = int(box.id[0]) if box.id is not None else -1
                         x1, y1, x2, y2 = map(int, box.xyxy[0])
                         cx = (x1 + x2) // 2
