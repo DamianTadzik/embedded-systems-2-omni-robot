@@ -5,7 +5,7 @@ from datetime import datetime
 from kinematics import omni4_inverse_kinematics
 
 # === MQTT client do odbierania prędkości vx vy omega ===
-from mqtt_client import start_mqtt, vx, vy, omega
+from mqtt_client import start_mqtt, state
 MQTT_BROKER = "localhost"   # lub IP, jeśli to inny komputer
 MQTT_PORT = 1883            # klasyczny port MQTT
 client = start_mqtt(broker=MQTT_BROKER, port=MQTT_PORT)
@@ -24,7 +24,10 @@ dt = 1.0 / 10
 time.sleep(2)
 while True:
     ts = datetime.now().strftime("%H:%M:%S.%f")[:-3]
-    print(f"[{ts}] {vx:.2f=} m/s, {vy:.2f=} m/s, {omega:.2f=} rad/s")
+    vx = state["vx"]
+    vy = state["vy"]
+    omega = state["omega"]
+    print(f"[{ts}] {vx=:.2f} m/s, {vy=:.2f} m/s, {omega=:.2f} rad/s")
 
     wheel_cmds, wheel_omegas = omni4_inverse_kinematics(vx, vy, omega, v_max, omega_max)
 

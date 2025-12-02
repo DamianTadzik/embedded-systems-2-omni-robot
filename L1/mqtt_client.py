@@ -1,7 +1,8 @@
 import json
 import paho.mqtt.client as mqtt
 
-vx = vy = omega = 0.0
+state = {"vx": 0.0, "vy": 0.0, "omega": 0.0}
+
 
 def on_connect(client, userdata, flags, rc):
     client.subscribe("robot/cmd_vel")
@@ -10,9 +11,9 @@ def on_message(client, userdata, msg):
     global vx, vy, omega
     try:
         data = json.loads(msg.payload.decode())
-        vx = float(data.get("vx", 0))
-        vy = float(data.get("vy", 0))
-        omega = float(data.get("omega", 0))
+        state["vx"] = float(data.get("vx", 0))
+        state["vy"] = float(data.get("vy", 0))
+        state["omega"] = float(data.get("omega", 0))
     except:
         pass
 
