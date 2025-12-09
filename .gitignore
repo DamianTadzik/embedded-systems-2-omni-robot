@@ -2,3 +2,8 @@
 runs/
 .vscode/
 yolov8n.pt
+*__pycache__*/
+
+# L3 specific ignores
+L3/monster_db/
+L3/runs/
