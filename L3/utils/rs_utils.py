@@ -2,7 +2,7 @@ import numpy as np
 
 # Vibe coded section begins
 
-def get_bbox_distance_percentile(depth_frame, x1, y1, x2, y2, percentile=20):
+def get_bbox_distance_percentile(depth_frame, x1, y1, x2, y2, percentile=35):
     depth_image = np.asanyarray(depth_frame.get_data())
 
     h, w = depth_image.shape
@@ -22,8 +22,10 @@ def get_bbox_distance_percentile(depth_frame, x1, y1, x2, y2, percentile=20):
     if len(roi) == 0:
         return None
 
+    # for i in range(5, 70, 5):
+    #     print(f"distance {i}% is  {np.percentile(roi, i) / 1000}")
     distance_val = np.percentile(roi, percentile)
 
-    return distance_val
+    return distance_val / 1000.0  # Convert to meters
 
 # Vibe coded section ends

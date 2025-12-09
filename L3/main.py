@@ -126,16 +126,13 @@ def main(display_image, use_realsense, use_mqtt):
                         conf = float(box.conf[0])
 
                         distance_m = -1.0
-                        distance_middle = -1.0
 
                         if use_realsense:
-                            distance_m = get_bbox_distance_percentile(depth_frame, x1, y1, x2, y2, percentile=80)
-                            distance_middle = depth_frame.get_distance((x1 + x2) // 2, (y1 + y2) // 2)
+                            distance_m = get_bbox_distance_percentile(depth_frame, x1, y1, x2, y2)
                             class_name += f" {distance_m:.2f} m"
 
                         print(f"Detected {class_name} with confidence {conf:.2f} at "
-                              f"({x1}, {y1}), ({x2}, {y2}) {(distance_m/1000):.2f} m away. FPS: {fps:.1f}") # Debug
-                        print(f"middle distance: {distance_middle:.2f} m") # Debug
+                              f"({x1}, {y1}), ({x2}, {y2}) {(distance_m):.2f} m away. FPS: {fps:.1f}")
 
                         if use_mqtt:
                             out_data = {"Cx":float((x1 + x2)//2), "Cy":float((y1 + y2)//2), "distance":float(distance_m)}
