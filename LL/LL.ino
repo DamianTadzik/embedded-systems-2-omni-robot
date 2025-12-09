@@ -6,36 +6,15 @@ const int pinDirTR = 11, pinPwmTR = 10, pinEncATR = 12, pinEncBTR = 21;
 const int pinDirBL = 19, pinPwmBL = 3, pinEncABL = 4, pinEncBBL = 8;
 const int pinDirBR = 16, pinPwmBR = 9, pinEncABR = 6, pinEncBBR = 7;
 
-// === Timery ===
-unsigned long lastTelemetryTime = 0;
-const unsigned long telemetryInterval = 1000; // ms
-
-unsigned long lastRegulationTime = 0;
-const unsigned long regulationInterval = 100; // ms
-
-unsigned long lastCommandTime = 0;
-const unsigned long commandTimeout = 1000; // ms, brak komendy → stop
-
-// === Enkodery ===
+// === Enkodery === // liczba impulsów na obrót enkodera: 240
 volatile int32_t countTL = 0, countTR = 0, countBL = 0, countBR = 0;
-volatile int32_t prev_count_TL = 0, prev_count_TR = 0, prev_count_BL = 0, prev_count_BR = 0;
-// --- Parametry enkoderów ---
-const float encoderPulsesPerRevolution = 240.0;
-const float regulationInterval_s = regulationInterval / 1000.0; // 0.1 s
 void countPulseTL() { if (digitalRead(pinEncBTL)) countTL++; else countTL--; }
 void countPulseTR() { if (digitalRead(pinEncBTR)) countTR++; else countTR--; }
 void countPulseBL() { if (digitalRead(pinEncBBL)) countBL++; else countBL--; }
 void countPulseBR() { if (digitalRead(pinEncBBR)) countBR++; else countBR--; }
 
-// === Regulator / sterowanie ===
-// To jest requested speed setpoint
-volatile int requested_speed_setpoint_TL = 0, requested_speed_setpoint_TR = 0, requested_speed_setpoint_BL = 0, requested_speed_setpoint_BR = 0;
-
-// To jest calculated speed from encoder
-volatile float current_speed_TL = 0.0, current_speed_TR = 0.0,  current_speed_BL = 0.0, current_speed_BR = 0.0;  // finish that TODO
-
-// To leci na silniki calculated dutycycle
-volatile int calculated_dutycycle_TL = 0, calculated_dutycycle_TR = 0, calculated_dutycycle_BL = 0, calculated_dutycycle_BR = 0;
+// === Timeout guard ===
+unsigned long lastCommand = 0;
 
 void setup() {
   // Ustawienie pinów jako wyjścia
@@ -47,8 +26,7 @@ void setup() {
   pinMode(pinPwmBL, OUTPUT);
   pinMode(pinDirBR, OUTPUT);
   pinMode(pinPwmBR, OUTPUT);
-
-  // Ustawienie przerwań dla enkoderów
+  // Ustawienie pinów enkoderów jako wejścia z podciąganiem
   pinMode(pinEncATL, INPUT_PULLUP);
   pinMode(pinEncBTL, INPUT_PULLUP);
   pinMode(pinEncATR, INPUT_PULLUP);
@@ -57,205 +35,122 @@ void setup() {
   pinMode(pinEncBBL, INPUT_PULLUP);
   pinMode(pinEncABR, INPUT_PULLUP);
   pinMode(pinEncBBR, INPUT_PULLUP);
+  // Ustawienie funkcji do obsługi przerwań dla enkoderów
   attachInterrupt(digitalPinToInterrupt(pinEncATL), countPulseTL, RISING);
   attachInterrupt(digitalPinToInterrupt(pinEncATR), countPulseTR, RISING);
   attachInterrupt(digitalPinToInterrupt(pinEncABL), countPulseBL, RISING);
   attachInterrupt(digitalPinToInterrupt(pinEncABR), countPulseBR, RISING);
-
-  Serial.begin(9600);
+  // Inicjalizacja komunikacji szeregowej
+  Serial.begin(230400);
+  lastCommand = millis();
 }
 
 
 // === Funkcja do sterowania silnikami ===
-// TL/TR/BL/BR ∈ [-255, 255] → kierunek i PWM
-void actuateMotors(int TL, int TR, int BL, int BR) {
+// TL/TR/BL/BR ∈ [-127, 127] → kierunek i PWM
+// 0 = stop, 127 = pełna prędkość do przodu, -127 = pełna prędkość do tyłu 
+void actuateMotors(int8_t TL, int8_t TR, int8_t BL, int8_t BR) {
   // --- TOP LEFT ---
   digitalWrite(pinDirTL, (TL >= 0) ? HIGH : LOW);
-  analogWrite(pinPwmTL, abs(TL));
+  analogWrite(pinPwmTL, abs(TL)<<1); // LSHFT skalowanie do [0, 254]
 
   // --- TOP RIGHT ---
   digitalWrite(pinDirTR, (TR >= 0) ? HIGH : LOW);
-  analogWrite(pinPwmTR, abs(TR));
+  analogWrite(pinPwmTR, abs(TR)<<1);
 
   // --- BOTTOM LEFT ---
   digitalWrite(pinDirBL, (BL >= 0) ? HIGH : LOW);
-  analogWrite(pinPwmBL, abs(BL));
+  analogWrite(pinPwmBL, abs(BL)<<1);
 
   // --- BOTTOM RIGHT ---
   digitalWrite(pinDirBR, (BR >= 0) ? HIGH : LOW);
-  analogWrite(pinPwmBR, abs(BR));
+  analogWrite(pinPwmBR, abs(BR)<<1);
 }
 
-// === UART ramka ===
-// 255 param setpointspeedTL setpointspeedTR setpointspeedBL setpointspeedBR
-#define PAYLOAD_BUF_LEN 5
-uint8_t payload_buffer[PAYLOAD_BUF_LEN] = { 0 };
-int index = 0;
 
-// === Dekodowanie ramki ===
-void handle_payload_buffer(void)
-{
-  int mult = payload_buffer[0];
-  requested_speed_setpoint_TL = ((int)payload_buffer[1] - 100) * mult;
-  requested_speed_setpoint_TR = ((int)payload_buffer[2] - 100) * mult;
-  requested_speed_setpoint_BL = ((int)payload_buffer[3] - 100) * mult;
-  requested_speed_setpoint_BR = ((int)payload_buffer[4] - 100) * mult;
+bool readControlFrame(int8_t* wheelCmd) {
+  // Sprawdzenie dostępności danych
+  if (Serial.available() < 6) return false;
+  
+  // Odczyt nagłówka
+  uint8_t header = Serial.read();
+  if (header != 0xAA) return false;
+
+  // Odczyt ramki
+  uint8_t data[5] = {0};
+  for (int i = 0; i < 5; i++) {
+    data[i] = Serial.read();
+  }
+
+  // Kalkulacja sumy kontrolnej
+  uint8_t checksum = 0xAA;
+  for (int i = 0; i < 4; i++) {
+    checksum += data[i];
+  }
+
+  // Sprawdzenie sumy kontrolnej
+  if (checksum != 4[data]) return false;
+
+  // Wypełnienie komend dla kół
+  wheelCmd[0] = (int8_t)(data[0]); // TL
+  wheelCmd[1] = (int8_t)(data[1]); // TR
+  wheelCmd[2] = (int8_t)(data[2]); // BL
+  wheelCmd[3] = (int8_t)(data[3]); // BR
+
+  return true;
 }
 
-// === Obliczanie prędkości z enkoderów ===
-void calculate_current_encoder_speeds(void)
-{
-  noInterrupts();
-  int32_t cur_TL = countTL;
-  int32_t cur_TR = countTR;
-  int32_t cur_BL = countBL;
-  int32_t cur_BR = countBR;
-  interrupts();
+void sendEncodersFrame() {
+  uint16_t tl, tr, bl, br;
+  noInterrupts(); // Blokada przerwań podczas odczytu liczników
+  tl = (uint16_t)(countTL & 0xFFFF);
+  tr = (uint16_t)(countTR & 0xFFFF);
+  bl = (uint16_t)(countBL & 0xFFFF);
+  br = (uint16_t)(countBR & 0xFFFF);
+  interrupts(); // Odblokowanie przerwań
 
-  // Zmiana liczby impulsów od ostatniego pomiaru
-  int32_t dTL = cur_TL - prev_count_TL;
-  int32_t dTR = cur_TR - prev_count_TR;
-  int32_t dBL = cur_BL - prev_count_BL;
-  int32_t dBR = cur_BR - prev_count_BR;
+  // Konstrukcja ramki
+  uint8_t frame[10];
+  frame[0] = 0xAA; // Nagłówek
+  frame[1] = (uint8_t)(tl & 0xFF);
+  frame[2] = (uint8_t)((tl >> 8) & 0xFF);
+  frame[3] = (uint8_t)(tr & 0xFF);
+  frame[4] = (uint8_t)((tr >> 8) & 0xFF);
+  frame[5] = (uint8_t)(bl & 0xFF);
+  frame[6] = (uint8_t)((bl >> 8) & 0xFF);
+  frame[7] = (uint8_t)(br & 0xFF);
+  frame[8] = (uint8_t)((br >> 8) & 0xFF);
 
-  prev_count_TL = cur_TL;
-  prev_count_TR = cur_TR;
-  prev_count_BL = cur_BL;
-  prev_count_BR = cur_BR;
+  // Kalkulacja sumy kontrolnej
+  uint8_t checksum = 0xAA;
+  for (int i = 1; i <= 8; i++) {
+    checksum += frame[i];
+  }
+  frame[9] = checksum & 0xFF;
 
-  // Prędkość w [obr/min]
-  float conv = (60.0 / encoderPulsesPerRevolution) / regulationInterval_s; // (imp / rev) * (interval)
-  current_speed_TL = dTL * conv;
-  current_speed_TR = dTR * conv;
-  current_speed_BL = dBL * conv;
-  current_speed_BR = dBR * conv;
+  // Wysłanie ramki
+  Serial.write(frame, 10);
 }
+
 
 void loop() {
-  // --- UART read ---
-  while (Serial.available() > 0) 
+  int8_t wheelCmd[4];
+
+  if (readControlFrame(wheelCmd))
   {
-    int received_byte = Serial.read();
-    
-    if (received_byte == 255)  // Frame start byte xdddd
-      index = 0;
-    else if (index < PAYLOAD_BUF_LEN) {
-      payload_buffer[index++] = received_byte;
-      if (index == PAYLOAD_BUF_LEN) {
-        handle_payload_buffer();
-        lastCommandTime = millis();
-      }
-    }
+    // Aktualizacja czasu ostatniej komendy
+    lastCommand = millis(); 
+
+    // Sterowanie silnikami
+    actuateMotors(wheelCmd[0], wheelCmd[1], wheelCmd[2], wheelCmd[3]);
+
+    // Wysłanie danych z enkoderów
+    sendEncodersFrame();
   }
 
-  // Periodic speed, regualtor and other actuations calculation
-  if (millis() - lastRegulationTime >= regulationInterval){
-    lastRegulationTime = millis();
-
-    // Compute the speeds from the encoders
-    calculate_current_encoder_speeds();
-
-    // Manually select the regulator or just feedforward
-    if (false)
-    {
-      // --- Simple P regulator ---
-      const float Kp = 1.2f;  // tune it later xd
-
-    // Compute the error, Compute the regulator output xd
-      float err_TL = requested_speed_setpoint_TL - current_speed_TL;
-      float err_TR = requested_speed_setpoint_TR - current_speed_TR;
-      float err_BL = requested_speed_setpoint_BL - current_speed_BL;
-      float err_BR = requested_speed_setpoint_BR - current_speed_BR;
-
-      calculated_dutycycle_TL = constrain(-(int)(Kp * err_TL), -255, 255);
-      calculated_dutycycle_TR = constrain((int)(Kp * err_TR), -255, 255);
-      calculated_dutycycle_BL = constrain(-(int)(Kp * err_BL), -255, 255);
-      calculated_dutycycle_BR = constrain((int)(Kp * err_BR), -255, 255);
-    }
-    else if (true)
-    {
-      // --- Simple PI regulator ---
-      const float Kp = 1.2f;   // proportional gain
-      const float Ki = 0.8f;   // integral gain — do strojenia
-      const float Imax = 200.0f;  // anti-windup limit (to avoid integrator overflow)
-
-      // static — zachowują wartość między wywołaniami
-      static float I_TL = 0, I_TR = 0, I_BL = 0, I_BR = 0;
-
-      // --- Compute errors ---
-      float err_TL = requested_speed_setpoint_TL - current_speed_TL;
-      float err_TR = requested_speed_setpoint_TR - current_speed_TR;
-      float err_BL = requested_speed_setpoint_BL - current_speed_BL;
-      float err_BR = requested_speed_setpoint_BR - current_speed_BR;
-
-      // --- Integrate errors ---
-      I_TL += err_TL * (regulationInterval / 1000.0f);
-      I_TR += err_TR * (regulationInterval / 1000.0f);
-      I_BL += err_BL * (regulationInterval / 1000.0f);
-      I_BR += err_BR * (regulationInterval / 1000.0f);
-
-      // --- Anti-windup clamp ---
-      I_TL = constrain(I_TL, -Imax, Imax);
-      I_TR = constrain(I_TR, -Imax, Imax);
-      I_BL = constrain(I_BL, -Imax, Imax);
-      I_BR = constrain(I_BR, -Imax, Imax);
-
-      // --- Compute total control (P + I) ---
-      float u_TL = Kp * err_TL + Ki * I_TL;
-      float u_TR = Kp * err_TR + Ki * I_TR;
-      float u_BL = Kp * err_BL + Ki * I_BL;
-      float u_BR = Kp * err_BR + Ki * I_BR;
-
-      // --- Apply direction flips as in your snippet ---
-      calculated_dutycycle_TL = constrain(-(int)u_TL, -255, 255);
-      calculated_dutycycle_TR = constrain((int)u_TR, -255, 255);
-      calculated_dutycycle_BL = constrain(-(int)u_BL, -255, 255);
-      calculated_dutycycle_BR = constrain((int)u_BR, -255, 255);
-    }
-
-    else
-    {
-      // --- Feedforward mode (no feedback) ---
-      // Directly map requested speeds to duty cycle
-      // Assuming requested_speed_setpoint_* ∈ [-255, 255]
-      calculated_dutycycle_TL = constrain(requested_speed_setpoint_TL, -255, 255);
-      calculated_dutycycle_TR = constrain(requested_speed_setpoint_TR, -255, 255);
-      calculated_dutycycle_BL = constrain(requested_speed_setpoint_BL, -255, 255);
-      calculated_dutycycle_BR = constrain(requested_speed_setpoint_BR, -255, 255);
-    }
+  // Safety stop if no command received for over 1 second
+  if (millis() - lastCommand > 1000)
+  {
+    actuateMotors(0, 0, 0, 0); // Stop all motors
   }
-
-  // --- if no command → stop ---
-  if (millis() - lastCommandTime < commandTimeout) {
-    actuateMotors(calculated_dutycycle_TL,
-                  calculated_dutycycle_TR,
-                  calculated_dutycycle_BL,
-                  calculated_dutycycle_BR);
-  } else {
-    actuateMotors(0, 0, 0, 0);
-  }
-
-  // Periodic telemetry
-  if (millis() - lastTelemetryTime >= telemetryInterval) {
-    lastTelemetryTime = millis();
-
-    noInterrupts();  // protect counts during read
-    int TL = countTL;
-    int TR = countTR;
-    int BL = countBL;
-    int BR = countBR;
-    interrupts();
-
-    Serial.print("ENC,");
-    Serial.print(TL); Serial.print(",");
-    Serial.print(TR); Serial.print(",");
-    Serial.print(BL); Serial.print(",");
-    Serial.print(BR);
-    Serial.print(", RPM,");
-    Serial.print(current_speed_TL); Serial.print(",");
-    Serial.print(current_speed_TR); Serial.print(",");
-    Serial.print(current_speed_BL); Serial.print(",");
-    Serial.println(current_speed_BR);
-  }
-  delay(1);
 }
