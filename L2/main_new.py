@@ -18,14 +18,14 @@ V_FOV = 58
 ### Controller choice (TWO-POS and PID available)
 REG_CHOICE = 'TWO-POS' # TWO-POS/PID
 ### Detector timeout [s]
-DETECTOR_TIMEOUT = 0.5
+DETECTOR_TIMEOUT = 2
 ### Main loop cycle time
 DT = 0.01 # s
 ### Parameters for TWO-POS control
 TWO_POS_ANGLE_THRESHOLD = 0.087 # rad
-TWO_POS_DISTANCE_THRESHOLD = 0.1
-TWO_POS_DISTANCE_OUTPUT = 0.5
-TWO_POS_ANGLE_OUTPUT = 0.5
+TWO_POS_DISTANCE_THRESHOLD = 0.05
+TWO_POS_DISTANCE_OUTPUT = 0.05
+TWO_POS_ANGLE_OUTPUT = 0.05
 ### Parameters for PID control
 PID_OUTPUT_TH_ANGLE = 0.5
 PID_OUTPUT_TH_DISTANCE = 0.5
@@ -102,7 +102,7 @@ class OskarFilter:
         self.last_update = time.time()
 
     def predict(self, dt):
-        self.x += self.v * dt
+        self.x = self.x -  self.v * dt
 
     def update(self, measurement):
         self.x = measurement
@@ -158,7 +158,7 @@ class InputFilterByDistance:
     def verify(self, val):
         mean = np.mean(self.detections)
         std = np.std(self.detections)
-        if np.abs(mean - val) > std:
+        if np.abs(mean - val) > 5*std:
             return False
         else:
             self.add(val)
@@ -261,7 +261,7 @@ class Follower:
         self.new_detection = False
         self.input_filter = InputFilterByDistance(STARTUP_DETECTIONS)
         self.startup_done = False
-        self.filter = FilterSetup(filter_choice, 0, 0)
+        self.filter = FilterSetup(filter_choice, 0, 0.3)
 
         self.vx = 0
         self.vy = 0
@@ -273,7 +273,7 @@ class Follower:
             Cx = float(data.get("Cx"))
             distance = float(data.get("distance"))
             angle = np.deg2rad((Cx - X/2) / X * H_FOV) # angle calculation
-            distance = distance * np.cos(angle) # orthogonal projection calculation (assumption)
+            #distance = distance * np.cos(angle) # orthogonal projection calculation (assumption)
             if not self.startup_done:
                 self.input_filter.add(distance)
                 if all(val is not None for val in self.input_filter.detections):
@@ -282,6 +282,7 @@ class Follower:
             if self.startup_done and self.input_filter.verify(distance):
                 self.raw_angle = angle
                 self.raw_dist = distance
+            
             self.last_detection_time = time.time()
             self.detector_active = True
             self.new_detection = True
@@ -305,6 +306,20 @@ class Follower:
                     est_angle, est_dist = self.filter.step(self.raw_angle, self.raw_dist,
                                                            self.new_detection,
                                                            self.vx, self.vy, self.omega)
+                    
+                    print("est_angle",est_angle)
+                    print("est_dist", est_dist)
+                    print(self.vx)
+                    print(self.omega)
+                    print(self.new_detection)
+                    with open("test_34.txt", "a") as f:
+                        f.write(f"est_angle: {est_angle}")
+                        f.write(f"est_dist: {est_dist}")
+                        f.write(f"speeds: {self.vx},{self.omega}")
+                        f.write(f"detection_flag: {self.new_detection}")
+                        f.write(f"raw_angle: {self.raw_angle}")
+                        f.write(f"raw_dist: {self.raw_dist}")
+                        f.write('\n')
 
                     self.new_detection = False
 
@@ -313,7 +328,7 @@ class Follower:
                     else:
                         self.vx, self.vy, self.omega = 0, 0, 0
 
-                    self.mqtt.publish(self.format_out_data(self.vx, self.vy, self.omega))
+                    self.mqtt.publish(self.format_out_data(self.vx, self.vy, 0))
 
             except KeyboardInterrupt:
                 self.mqtt.publish(self.format_out_data(0, 0, 0))
@@ -322,6 +337,6 @@ class Follower:
 
 if __name__ == "__main__":
     SP_ANGLE = 0
-    SP_DISTANCE = 0.3
+    SP_DISTANCE = 0.5
     robot = Follower(SP_ANGLE, SP_DISTANCE, REG_CHOICE, FILTER_CHOICE)
     robot.loop()
