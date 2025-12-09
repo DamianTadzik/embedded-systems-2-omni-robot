@@ -26,6 +26,9 @@ def get_bbox_distance_percentile(depth_frame, x1, y1, x2, y2, percentile=35):
     #     print(f"distance {i}% is  {np.percentile(roi, i) / 1000}")
     distance_val = np.percentile(roi, percentile)
 
+    if distance_val is None:
+        distance_val = 0.0
+
     return distance_val / 1000.0  # Convert to meters
 
 # Vibe coded section ends
