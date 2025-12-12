@@ -1,80 +1,151 @@
-# L1 – High-Level Velocity Interface
+# L1 – High-Level Velocity & Wheel Speed Control
 
-The L1 layer is responsible for receiving high-level velocity commands (vx, vy, omega) and converting them into low-level wheel commands for the Arduino/LL layer.  
-It supports two control sources:
+The **L1 layer** is responsible for closing the **wheel speed control loop** on the host computer (Jetson/PC).
+It receives high-level velocity commands `(vx, vy, omega)`, converts them into **desired wheel angular speeds**, and **regulates each wheel using PID controllers** based on encoder feedback from the LL (Arduino) layer.
 
-- Web-based controller (app.html via MQTT/WebSockets)
-- L2 layer (main system; preferred in real operation)
+L1 therefore no longer operates in open-loop PWM mode – **wheel speed control is closed in L1**.
 
-L1 performs inverse kinematics for a 4-wheel mecanum robot and transmits the resulting wheel commands to the LL layer via UART.
+---
+
+## Responsibilities of L1
+
+* Receive high-level velocity commands `(vx, vy, omega)` via MQTT
+* Compute desired wheel angular velocities using mecanum inverse kinematics
+* Read encoder feedback from LL over UART
+* Compute wheel angular speeds `[rad/s]`
+* Run **4 independent PID controllers** (one per wheel)
+* Send **PWM duty cycles** to LL
+
+---
+
+## Control Architecture
+
+```
+(vx, vy, omega)
+        ↓
+   Inverse Kinematics
+        ↓
+Desired wheel speeds [rad/s]
+        ↓
+   PID (per wheel)
+        ↓
+   PWM duty cycles
+        ↓
+        LL (Arduino)
+        ↓
+     Motors + Encoders
+        ↑
+   Encoder feedback (UART)
+```
+
+---
 
 ## Project Structure
 
 ```
-L1/
- ├── L1.py
- ├── app.html
- └── mqttws31.min.js
+L1.py              # Main control loop (IK + PID + UART)
+PID.py             # Simple PID controller implementation
+kinematics.py      # Mecanum inverse kinematics
+serial_link.py     # UART protocol + encoder decoding
+mqtt_client.py     # MQTT interface (cmd_vel)
+app.html           # Web joystick (debug / teleop)
+TODO.md            # Planned improvements
 ```
 
-### L1.py
+---
 
-Python application that:
+## MQTT Interface
 
-- Subscribes to MQTT topic `robot/cmd_vel`
-- Parses JSON `{vx, vy, omega}`
-- Computes wheel speeds using inverse kinematics
-- Converts wheel speeds → signed speed commands
-- Encodes a UART packet:
+### Topic
 
 ```
-[255, multiplier, TL, TR, BL, BR]
+robot/cmd_vel
 ```
 
-- Sends it to LL over `/dev/ttyACM0`
+### Message format
 
-L1 runs at 5 Hz by default.
-
-### app.html
-
-A standalone web UI that:
-
-- Connects to the MQTT broker over WebSockets
-- Provides:
-    - Virtual joystick (vx, vy)
-    - Slider for rotation (omega)
-    - Telemetry panel
-- Publishes JSON commands:
-
-```
-{ "vx": ..., "vy": ..., "omega": ... }
+```json
+{ "vx": 0.0, "vy": 0.0, "omega": 0.0 }
 ```
 
-to the topic `robot/cmd_vel` every 100 ms.
+* `vx`, `vy` – linear velocities [m/s]
+* `omega` – angular velocity [rad/s]
 
-Used mainly for debugging and teleoperation.
+Commands may originate from:
 
-### mqttws31.min.js
+* **L2 motion planner** (normal operation)
+* **Web UI** (`app.html`) for testing
 
-Local Paho MQTT JavaScript client used by the web interface.
+---
 
-## How to Run L1
+## UART Interface (L1 ↔ LL)
 
-1. Start Mosquitto (MQTT broker)
+### L1 → LL
 
-Make sure the MQTT broker is running (see MQTT README):
+* Sends PWM duty cycles for 4 wheels
+* Range: `[-127, 127]` (mapped internally to signed percentage)
+
+### LL → L1
+
+* Sends raw encoder counts (16-bit, with wrap-around)
+* L1 computes:
+
+  * wheel angular speed `[rad/s]`
+  * loop `dt`
+
+All encoder handling and speed estimation is done in **serial_link.py**.
+
+---
+
+## PID Control
+
+* One PID per wheel: `TL`, `TR`, `BL`, `BR`
+* Inputs:
+
+  * Target wheel speed `[rad/s]`
+  * Measured wheel speed `[rad/s]`
+* Output:
+
+  * PWM duty cycle command
+
+Current gains (to be tuned):
+
+```
+kp = 1.2
+ki = 12.0
+kd = 0.04
+output_limit = 127
+```
+
+---
+
+## Web Controller (Debug Only)
+
+`app.html` provides:
+
+* Virtual joystick → `(vx, vy)`
+* Slider → `omega`
+* MQTT over WebSockets
+
+Used **only for debugging and teleoperation** when L2 is unavailable.
+
+---
+
+## How to Run
+
+### 1. Start MQTT broker
 
 ```
 mosquitto -v -c my_mosquitto.conf
 ```
 
-2. Run the L1 Python application
+### 2. Run L1
 
 ```
 python3 L1.py
 ```
 
-Requirements:
+Dependencies:
 
 ```
 pip install paho-mqtt pyserial numpy
@@ -82,93 +153,30 @@ pip install paho-mqtt pyserial numpy
 
 L1 will:
 
-- Connect to MQTT (`localhost:1883`)
-- Open `/dev/ttyACM0`
-- Start converting and sending wheel commands to LL
+* Connect to MQTT (`localhost:1883`)
+* Open `/dev/ttyACM0`
+* Start encoder reader thread
+* Close the wheel speed control loop
 
-## How to Use the Web Controller
+---
 
-Simply open the file:
-
-`app.html`
-
-The page:
-
-- Connects to the broker via WebSockets (`ws://<jetson_ip>:9001`)
-- Sends joystick and slider commands to `robot/cmd_vel`
-- Displays sent values and connection status
-
-No hosting is required; the file works when opened directly in a browser.
-
-## Data Flow
-
-From Web → L1 → LL → Motors
+## Data Flow Summary
 
 ```
-app.html
-        ↓ MQTT/WebSockets (9001)
-Mosquitto broker
-        ↓ MQTT (1883)
-L1.py
-        ↓ UART
-LL (Arduino)
-        ↓ PWM signals
-Motors
+L2 / Web UI
+      ↓ MQTT
+     L1 (IK + PID)
+      ↓ UART
+     LL (Motor driver)
+      ↓
+    Motors
 ```
 
-From L2 → L1 → LL
+---
 
-The primary use case:
+## Notes
 
-```
-L2 (main motion planner)
-        ↓ MQTT (cmd_vel)
-L1 (kinematics + UART)
-        ↓
-LL (firmware)
-```
-
-The web controller is mainly for testing when L2 is unavailable.
-
-## Inverse Kinematics Model
-
-L1 uses standard mecanum kinematics:
-
-```
-[ w1 ]   [  1  -1  -(L+W) ]   [ vx ]
-[ w2 ] = [  1   1   (L+W) ] * [ vy ]  / r
-[ w3 ]   [  1   1  -(L+W) ]   [ omega ]
-[ w4 ]   [  1  -1   (L+W) ]
-```
-
-Wheel angular velocities are normalized and mapped to:
-
-- PWM [0…255]
-- Direction bit
-- Signed speed [-100…100]
-- Encoded UART data [0…200]
-
-## UART Command Format (L1 → LL)
-
-```
-byte[0] = 255          // Start byte
-byte[1] = multiplier   // Normally 1
-byte[2] = TL
-byte[3] = TR
-byte[4] = BL
-byte[5] = BR
-```
-
-Each wheel speed:
-
-signed_percent [-100..100] → encoded [0..200]
-
-## Summary
-
-The L1 layer is a bridge between high-level velocity control and low-level wheel actuation:
-
-- Accepts vx, vy, omega
-- Computes wheel commands
-- Encodes and sends them to LL firmware
-- Allows both L2 and a web interface to control the robot
-- Uses MQTT for messaging and UART for motor command delivery
+* L1 is now a **real-time wheel speed regulator**, not just a kinematics bridge
+* LL firmware is simplified (no PID inside Arduino)
+* Timing quality depends on host OS scheduling
+* Future improvement: move PID to LL if hard real-time is required
