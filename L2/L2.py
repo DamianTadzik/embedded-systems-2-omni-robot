@@ -25,8 +25,8 @@ DT = 0.1 # s
 ### Parameters for TWO-POS control
 TWO_POS_ANGLE_THRESHOLD = 0.087 # rad
 TWO_POS_DISTANCE_THRESHOLD = 0.05
-TWO_POS_DISTANCE_OUTPUT = 0.05
-TWO_POS_ANGLE_OUTPUT = 0.05
+TWO_POS_DISTANCE_OUTPUT = 0.1
+TWO_POS_ANGLE_OUTPUT = 0.1
 ### Parameters for PID control
 PID_OUTPUT_TH_ANGLE = 0.5
 PID_OUTPUT_TH_DISTANCE = 0.5
@@ -55,7 +55,7 @@ DISTANCE_ALPHA = 0.5
 DISTANCE_BETA = 0.05
 ### Number od detections for startup
 ## 1 - TABULAR, 2 - CUTOFF, NONE
-INPUT_FILTER_CHOICE = 'TABULAR'
+INPUT_FILTER_CHOICE = 'CUTOFF'
 ### Startup detections for tabular filter (1)
 STARTUP_DETECTIONS = 20
 ### Std multiplier (1)
@@ -347,8 +347,6 @@ class Follower:
         self.log_file.write("#" * 100 + "\n")
         self.log_file.write(f"Timer             : {timer}\n")
         self.log_file.write(f"Startup status    : {self.startup_done}\n")
-        if INPUT_FILTER_CHOICE == 'TABULAR':
-            self.log_file.write(f"Input filter      : {self.input_filter.detections}\n")
         self.log_file.write(f"Last rejected dist: {self.last_rejected_distance}\n")
         self.log_file.write(f"New detection flag: {new_detection}\n")
         self.log_file.write(f"Raw angle         : {angle}\n")
