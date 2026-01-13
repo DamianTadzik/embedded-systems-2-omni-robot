@@ -28,6 +28,8 @@ def main(display_image, use_realsense, use_mqtt):
     print("Starting the application...")
     print(f'Display image: {display_image}\nUse RealSense: {use_realsense} \nUse MQTT: {use_mqtt}')
 
+    distance_m = 0
+
     # MQTT setup
     if use_mqtt:
         MQTT_PUBLISH_TOPIC = "robot/nn_output"
@@ -141,7 +143,10 @@ def main(display_image, use_realsense, use_mqtt):
 
                             # 💡 TU jest logika łączona — używamy Twojej funkcji get_bbox_distance_percentile
                             if use_realsense:
-                                distance_m = depth_frame.get_distance((x1 + x2)//2, (y1 + y2)//2)
+                                distance_temp = depth_frame.get_distance((x1 + x2)//2, (y1 + y2)//2)
+
+                                distance_m = distance_temp if abs(distance_temp - distance_m) < 1 else distance_m
+
                                 class_name += f" {distance_m:.2f} m"
 
                                 print(f"Detected {class_name} with confidence {conf:.2f} at "
@@ -210,7 +215,9 @@ def main(display_image, use_realsense, use_mqtt):
                         lost_counter = 0
 
                         if use_realsense:
-                                distance_m = get_bbox_distance_percentile(depth_frame, x1, y1, x2, y2)
+                                distance_temp = depth_frame.get_distance((x1 + x2)//2, (y1 + y2)//2)
+
+                                distance_m = distance_temp if abs(distance_temp - distance_m) < 1 else distance_m
                                 class_name += f" {distance_m:.2f} m"
 
                         print(f"Detected {class_name} with confidence {conf:.2f} at "
