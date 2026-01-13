@@ -272,6 +272,8 @@ class TwoPosCotroller:
             output = self.output_val
         elif var - self.setpoint < -self.threshold:
             output = -self.output_val
+        else:
+            output = 0
         return output
 
 class ControlSetup:
