@@ -4,6 +4,8 @@ import paho.mqtt.client as mqtt
 import time
 import json
 import threading
+import socket
+import msgpack
 
 # CONSTANTS
 
@@ -30,10 +32,10 @@ TWO_POS_ANGLE_OUTPUT = 0.1
 ### Parameters for PID control
 PID_OUTPUT_TH_ANGLE = 0.5
 PID_OUTPUT_TH_DISTANCE = 0.5
-KP_ANGLE = 0.1
+KP_ANGLE = 0.2
 KI_ANGLE = 0
 KD_ANGLE = 0
-KP_DIST = 0.1
+KP_DIST = 0.2
 KI_DIST = 0
 KD_DIST = 0
 
@@ -118,6 +120,7 @@ class OskarFilter:
 
     def predict(self, dt):
         self.x -= self.v * dt
+        pass
 
     def update(self, measurement):
         self.x = measurement
@@ -249,7 +252,7 @@ class PIDController:
         return result
 
     def compute(self, var, dt):
-        error = self.setpoint - var
+        error = -(self.setpoint - var)
         P_out = self.Kp * error
         self.integral += error * dt
         I_out = self.Ki * self.integral
@@ -272,6 +275,8 @@ class TwoPosCotroller:
             output = self.output_val
         elif var - self.setpoint < -self.threshold:
             output = -self.output_val
+        else:
+            output = 0
         return output
 
 class ControlSetup:
@@ -311,6 +316,28 @@ class MQTTInterface:
 
 ## Control algorithm
 
+def send_telemetry(sock, in1, in2, in3, in4):
+    addr = ("255.255.255.255", 9870)
+    packet = {
+        "timestamp":time.time(),
+        "ctrl":{
+            "vx":in1,
+            "omega":in2
+            },
+        
+        "L2_input":{
+            "raw_dist":in3,
+            "raw_angle":in4
+            }
+    }
+    try:
+        bin_packet = msgpack.packb(packet, use_bin_type=True)
+        sock.sendto(bin_packet, addr)
+        print('sending telemetry.')
+    except Exception:
+        print('NOT sending telemetry.')
+        pass
+
 
 class Follower:
     def __init__(self, sp_angle, sp_distance, controller_choice, filter_choice, logger_active):
@@ -326,7 +353,7 @@ class Follower:
         self.mqtt = MQTTInterface(self.mqtt_callback)
         self.logger_active = logger_active
         if logger_active:
-            self.log_file = open("logs.txt", "a")
+            self.log_file = open("logs_20_01_two_pos.txt", "a")
             self.log_file.write("#" * 100 + "\n")
             self.log_file.write("Program started.\n")
             self.log_file.write("#" * 100 + "\n\n\n")
@@ -339,7 +366,8 @@ class Follower:
         self.new_detection = False
         self.input_filter = InputFilterSetup(INPUT_FILTER_CHOICE)
         self.startup_done = False
-
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
 
         self.vx = 0
         self.vy = 0
@@ -424,10 +452,12 @@ class Follower:
                     else:
                         self.vx, self.vy, self.omega = 0, 0, 0
 
-                    self.mqtt.publish(self.format_out_data(self.vx, self.vy, 0))
+                    self.mqtt.publish(self.format_out_data(self.vx, self.vy, self.omega))
 
                     if self.logger_active and self.detector_active:
                         self.write_logs(timer, new, est_angle, est_dist, angle, dist)
+
+                    send_telemetry(self.sock, self.vx, self.omega, self.raw_dist, self.raw_angle)
 
             except KeyboardInterrupt:
                 self.mqtt.publish(self.format_out_data(0, 0, 0))
