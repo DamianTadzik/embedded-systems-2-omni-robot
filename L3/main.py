@@ -3,7 +3,7 @@ import numpy as np
 import cv2
 import argparse
 import pyrealsense2 as rs
-from ultralytics import YOLO
+import onnxruntime as ort
 import random
 import logging
 logging.getLogger("ultralytics").setLevel(logging.ERROR)
@@ -69,8 +69,14 @@ def main(display_image, use_realsense, use_mqtt):
     t0 = time.time()
     fps = 0.0
 
+    providers = [
+        "TensorrtExecutionProvider",
+        "CUDAExecutionProvider",
+        "CPUExecutionProvider"
+    ]
+
     # Load YOLO model
-    yolo = YOLO("./L3/monster_net_0.2.pt")
+    session = ort.InferenceSession("./L3/monster_net_0.2.onnx", providers=providers)
 
     # Tracking State
     selected_target = None
@@ -106,68 +112,89 @@ def main(display_image, use_realsense, use_mqtt):
             if frame_count % 15 == 0:
                 t1 = time.time()
                 fps = 15.0 / (t1 - t0)
+                print(f"FPS: {fps}")
                 t0 = t1
 
-            results = yolo.track(color_image, stream=True)
+            # convert image to float
+            color_image_ = color_image.astype(np.float32) / 255.0
+            color_image_ = np.transpose(color_image_, (2, 0, 1))
+
+            # Pad image to be square
+            c, s2, s3 = color_image_.shape
+            pad_total = s3 - s2
+            pad_before = pad_total // 2
+            pad_after = pad_total - pad_before
+            color_image_ = np.pad(
+                color_image_,
+                pad_width=((0, 0), (pad_before, pad_after), (0, 0)),
+                mode="constant"  # or "edge", "reflect", etc.
+            )
+
+            color_image_ = np.reshape(color_image_, (1, color_image_.shape[0], color_image_.shape[1], color_image_.shape[2]))
+            outputs = session.run(None, {"images": color_image_})
 
             found_selected = False
 
-            for result in results:
-                class_names = result.names
+            pred = outputs[0]
+            pred = pred.T
 
-                for box in result.boxes:
-                    conf = float(box.conf[0])
-                    cls = int(box.cls[0])
+            for det in pred:
+                x1, y1, x2, y2, conf, cls = det
 
-                    if conf > 0.4 and cls == 1:
-                        class_name = class_names[cls]
-                        track_id = int(box.id[0]) if box.id is not None else -1
-                        x1, y1, x2, y2 = map(int, box.xyxy[0])
-                        cx = (x1 + x2) // 2
-                        cy = (y1 + y2) // 2
+                conf = float(conf)
+                cls = int(cls)
 
-                        if selected_target is None:
-                            selected_target = track_id
+                if conf > 0.04:
+                    class_name = "monster"
 
-                        if track_id == selected_target:
-                            found_selected = True
-                            lost_counter = 0
+                    x1, y1, x2, y2 = map(int, [x1, y1, x2, y2])
 
-                            # Save template
-                            last_bbox = (x1, y1, x2, y2)
-                            template_age = 0
-                            w = x2 - x1
-                            h = y2 - y1
-                            if w >= TEMPLATE_MIN_SIZE and h >= TEMPLATE_MIN_SIZE:
-                                last_template = color_image[y1:y2, x1:x2].copy()
+                    track_id = -1
+                    cx = (x1 + x2) // 2
+                    cy = (y1 + y2) // 2
 
-                            # 💡 TU jest logika łączona — używamy Twojej funkcji get_bbox_distance_percentile
-                            if use_realsense:
-                                distance_temp = depth_frame.get_distance((x1 + x2)//2, (y1 + y2)//2)
+                    if selected_target is None:
+                        selected_target = track_id
 
-                                distance_m = distance_temp if abs(distance_temp - distance_m) < 1 else distance_m
+                    if track_id == selected_target:
+                        found_selected = True
+                        lost_counter = 0
 
-                                class_name += f" {distance_m:.2f} m"
+                        # Save template
+                        last_bbox = (x1, y1, x2, y2)
+                        template_age = 0
+                        w = x2 - x1
+                        h = y2 - y1
+                        if w >= TEMPLATE_MIN_SIZE and h >= TEMPLATE_MIN_SIZE:
+                            last_template = color_image[y1:y2, x1:x2].copy()
 
-                                print(f"Detected {class_name} with confidence {conf:.2f} at "
-                                f"({x1}, {y1}), ({x2}, {y2}) {distance_m:.2f} m away. FPS: {fps:.1f}")
+                        # 💡 TU jest logika łączona — używamy Twojej funkcji get_bbox_distance_percentile
+                        if use_realsense:
+                            distance_temp = depth_frame.get_distance((x1 + x2)//2, (y1 + y2)//2)
 
-                            # MQTT
-                            if use_mqtt:
-                                out_data = {
-                                    "Cx": float(cx),
-                                    "Cy": float(cy),
-                                    "distance": float(distance_m) if distance_m is not None else None,
-                                }
-                                mqttc.publish(MQTT_PUBLISH_TOPIC, json.dumps(out_data, separators=(',', ':')), 0)
+                            distance_m = distance_temp if abs(distance_temp - distance_m) < 1 else distance_m
 
-                            if display_image:
-                                color = get_color_for_id(selected_target)
-                                label = f"ID:{selected_target} {distance_m:.2f}m"
-                                cv2.rectangle(color_image, (x1, y1), (x2, y2), color, 2)
-                                cv2.putText(color_image, label,
-                                            (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX,
-                                            0.6, color, 2)
+                            class_name += f" {distance_m:.2f} m"
+
+                            print(f"Detected {class_name} with confidence {conf:.2f} at "
+                            f"({x1}, {y1}), ({x2}, {y2}) {distance_m:.2f} m away. FPS: {fps:.1f}")
+
+                        # MQTT
+                        if use_mqtt:
+                            out_data = {
+                                "Cx": float(cx),
+                                "Cy": float(cy),
+                                "distance": float(distance_m) if distance_m is not None else None,
+                            }
+                            mqttc.publish(MQTT_PUBLISH_TOPIC, json.dumps(out_data, separators=(',', ':')), 0)
+
+                        if display_image:
+                            color = get_color_for_id(selected_target)
+                            label = f"ID:{selected_target} {distance_m:.2f}m"
+                            cv2.rectangle(color_image, (x1, y1), (x2, y2), color, 2)
+                            cv2.putText(color_image, label,
+                                        (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX,
+                                        0.6, color, 2)
 
             # ------------------------- TEMPLATE FALLBACK TRACKING -----------------------
             if selected_target is not None and not found_selected and last_template is not None and last_bbox is not None:
@@ -221,7 +248,7 @@ def main(display_image, use_realsense, use_mqtt):
                                 class_name += f" {distance_m:.2f} m"
 
                         print(f"Detected {class_name} with confidence {conf:.2f} at "
-                              f"({x1}, {y1}), ({x2}, {y2}) {distance_m:.2f} m away. FPS: {fps:.1f}")
+                                f"({x1}, {y1}), ({x2}, {y2}) {distance_m:.2f} m away. FPS: {fps:.1f}")
 
                         if use_mqtt:
                             out_data = {
