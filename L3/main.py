@@ -11,6 +11,14 @@ import paho.mqtt.client as mqtt
 import json
 from utils.rs_utils import get_bbox_distance_percentile
 
+import socket
+import msgpack
+udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+udp_sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+udp_addr = ("255.255.255.255", 9870)
+
+
+
 # Fix for numpy compatibility
 np.int = int
 
@@ -85,6 +93,7 @@ def main(display_image, use_realsense, use_mqtt):
 
     try:
         while True:
+            t_cap0 = time.perf_counter()
             if use_realsense:
                 frames = pipeline.wait_for_frames()
                 aligned_frames = align.process(frames)
@@ -95,8 +104,10 @@ def main(display_image, use_realsense, use_mqtt):
 
                 depth_display = np.asanyarray(colorizer.colorize(depth_frame).get_data())
                 color_image = np.asanyarray(color_frame.get_data())
+                t_cap1 = time.perf_counter()
             else:
                 ret, color_image = cam.read()
+                t_cap1 = time.perf_counter()
                 if not ret:
                     continue
 
@@ -106,7 +117,11 @@ def main(display_image, use_realsense, use_mqtt):
                 fps = 15.0 / (t1 - t0)
                 t0 = t1
 
+            t_inf0 = time.perf_counter()
             results = yolo.track(color_image, stream=True)
+            t_inf1 = time.perf_counter()
+
+            t_post0 = time.perf_counter()
 
             found_selected = False
 
@@ -239,6 +254,24 @@ def main(display_image, use_realsense, use_mqtt):
                     last_template = None
                     lost_counter = 0
                     template_age = 0
+            t_post1 = time.perf_counter()
+            profiling = {
+                "t_cap_ms": (t_cap1 - t_cap0) * 1000.0,
+                "t_inf_ms": (t_inf1 - t_inf0) * 1000.0,
+                "t_post_ms": (t_post1 - t_post0) * 1000.0,
+            }
+            packet = {
+                "timestamp": time.time(),
+                "profiling": profiling
+            }
+            try:
+                udp_sock.sendto(
+                    msgpack.packb(packet, use_bin_type=True),
+                    udp_addr
+                )
+            except Exception:
+                pass
+
 
             if display_image:
                 if use_realsense:
